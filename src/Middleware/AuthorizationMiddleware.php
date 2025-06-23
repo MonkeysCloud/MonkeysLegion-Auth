@@ -10,20 +10,33 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
+/**
+ * Authorization middleware that inspects #[Can] attributes and enforces policies,
+ * but skips checks on configured public path patterns (supports globs via fnmatch).
+ */
 final class AuthorizationMiddleware implements MiddlewareInterface
 {
+    /**
+     * @param AuthorizationService $authorization The authorization service
+     * @param string[]             $publicPaths    Glob patterns of paths to bypass authorization
+     */
     public function __construct(
-        private AuthorizationService $authorization
+        private AuthorizationService $authorization,
+        private array $publicPaths = []
     ) {}
 
-    /**
-     * Inspect #[Can(...)] on controller classes and methods,
-     * and invoke the policy via AuthorizationService.
-     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        // Expect the route handler to have been stored as attribute 'handler'
-        // and be an array: [ControllerClass::class, 'methodName']
+        $path = $request->getUri()->getPath();
+
+        // Skip authorization on any public path pattern
+        foreach ($this->publicPaths as $pattern) {
+            if (fnmatch($pattern, $path, FNM_CASEFOLD)) {
+                return $handler->handle($request);
+            }
+        }
+
+        // Expect the route handler stored as attribute 'handler' => [ControllerClass, 'method']
         $handlerDef = $request->getAttribute('handler');
         if (is_array($handlerDef) && count($handlerDef) === 2) {
             [$class, $method] = $handlerDef;
@@ -40,15 +53,13 @@ final class AuthorizationMiddleware implements MiddlewareInterface
                 /** @var Can $meta */
                 $meta = $attr->newInstance();
 
-                // Current user (injected earlier by JwtAuthMiddleware)
+                // Current user (injected by previous middleware)
                 $user  = $request->getAttribute('user');
 
-                // If the policy is model‐based, pull model from request attribute 'model'
-                $model = $meta->model
-                    ? $request->getAttribute('model')
-                    : null;
+                // Model if specified
+                $model = $meta->model ? $request->getAttribute('model') : null;
 
-                // Throws on unauthorized
+                // Throws exception on unauthorized
                 $this->authorization->check($user, $meta->ability, $model);
             }
         }
