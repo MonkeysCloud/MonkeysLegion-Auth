@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace MonkeysLegion\Auth\Middleware;
 
 use MonkeysLegion\Auth\Attributes\Can;
-use MonkeysLegion\AuthService\AuthorizationService;
+use MonkeysLegion\Auth\AuthService\AuthorizationService;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Http\Message\ServerRequestInterface;
