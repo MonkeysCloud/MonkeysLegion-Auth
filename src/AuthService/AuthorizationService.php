@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace MonkeysLegion\AuthService;
+namespace MonkeysLegion\Auth\AuthService;
 
 use MonkeysLegion\Auth\Policy\PolicyInterface;
 use RuntimeException;
