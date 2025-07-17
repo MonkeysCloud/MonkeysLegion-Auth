@@ -29,8 +29,27 @@ final class AuthorizationMiddleware implements MiddlewareInterface
     {
         $path = $request->getUri()->getPath();
 
-        // Skip authorization on any public path pattern
+        // 1) Bypass on any public pattern
         foreach ($this->publicPaths as $pattern) {
+            // a) global wildcard
+            if ($pattern === '*' || $pattern === '/*') {
+                return $handler->handle($request);
+            }
+
+            // b) prefix wildcard ("/auth/*" → prefix "/auth/")
+            if (str_ends_with($pattern, '*')) {
+                $prefix = rtrim($pattern, '*');
+                if (str_starts_with($path, $prefix)) {
+                    return $handler->handle($request);
+                }
+            }
+
+            // c) exact match
+            if ($pattern === $path) {
+                return $handler->handle($request);
+            }
+
+            // d) fallback fnmatch just in case
             if (fnmatch($pattern, $path, FNM_CASEFOLD)) {
                 return $handler->handle($request);
             }
