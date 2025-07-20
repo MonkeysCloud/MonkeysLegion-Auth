@@ -5,6 +5,7 @@ namespace MonkeysLegion\Auth\Middleware;
 
 use MonkeysLegion\Auth\JwtService;
 use MonkeysLegion\Http\Message\JsonResponse;
+use MonkeysLegion\Mlc\Config;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -13,7 +14,10 @@ use RuntimeException;
 
 final class JwtUserMiddleware implements MiddlewareInterface
 {
-    public function __construct(private JwtService $jwt) {}
+    public function __construct(
+        private JwtService $jwt,
+        private Config $config
+    ) {}
 
     /**
      * Process the request to extract JWT claims and user ID.
@@ -25,6 +29,15 @@ final class JwtUserMiddleware implements MiddlewareInterface
      */
     public function process(ServerRequestInterface $req, RequestHandlerInterface $handler): ResponseInterface
     {
+        // Skip JWT decoding for public paths
+        $path = $req->getUri()->getPath();
+        $public = $this->config->get('auth.public_paths', []);
+        if (in_array($path, $public, true)) {
+            // don’t try to decode JWT here
+            return $handler->handle($req);
+        }
+
+        // Check for Authorization header
         $auth = $req->getHeaderLine('Authorization');
         if (! str_starts_with($auth, 'Bearer ')) {
             return new JsonResponse(['error'=>true,'message'=>'Missing token'], 401);
