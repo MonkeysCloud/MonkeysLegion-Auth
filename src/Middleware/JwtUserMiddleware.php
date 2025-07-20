@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace App\Middleware;
+namespace MonkeysLegion\Auth\Middleware;
 
 use MonkeysLegion\Auth\JwtService;
 use MonkeysLegion\Http\Message\JsonResponse;
