@@ -39,18 +39,20 @@ final class AuthService
      */
     public function register(string $email, string $password): User
     {
-        /** @var User|null $existing */
-        $existing = $this->users->findOneBy(['email' => $email]);
-        if ($existing) {
-            throw new RuntimeException('Email already registered');
+        $user = (new User)
+            ->setEmail($email)
+            ->setPasswordHash($this->hasher->hash($password));
+
+        try {
+            // save() populates $user->id automatically
+            $this->users->save($user);
+        } catch (PDOException $e) {
+            // 23000 = integrity-constraint violation, 1062 = duplicate entry
+            if ($e->getCode() === '23000' || $e->errorInfo[1] === 1062) {
+                throw new RuntimeException('Email already registered', 409, $e);
+            }
+            throw $e;
         }
-
-        $user = new User();
-        $user->setEmail($email);
-        $user->setPasswordHash($this->hasher->hash($password));
-
-        $id = $this->users->save($user);
-        $user->setId($id);
 
         return $user;
     }
