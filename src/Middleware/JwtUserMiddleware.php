@@ -21,42 +21,57 @@ final class JwtUserMiddleware implements MiddlewareInterface
         private Config     $config
     ) {}
 
+    /**
+     * Processes the request to decode JWT and attach user information.
+     *
+     * @param ServerRequestInterface $req
+     * @param RequestHandlerInterface $handler
+     * @return ResponseInterface
+     * @throws \JsonException
+     */
     public function process(ServerRequestInterface $req,
                             RequestHandlerInterface $handler): ResponseInterface
     {
         $path   = $req->getUri()->getPath();
         $public = $this->config->get('auth.public_paths', []);
+        $auth   = $req->getHeaderLine('Authorization');
 
-        // ① Skip JWT check on public paths
-        if (PathMatcher::isMatch($path, $public)) {
-            return $handler->handle($req);
+        // 1) If there's a Bearer token, try to decode & attach it
+        if (str_starts_with($auth, 'Bearer ')) {
+            $token = substr($auth, 7);
+            try {
+                $claims = $this->jwt->decode($token);
+                $userId = (int) ($claims['sub'] ?? $claims['uid'] ?? $claims['id'] ?? 0);
+
+                // attach in all cases
+                $req = $req
+                    ->withAttribute('jwt_claims', $claims)
+                    ->withAttribute('user_id',    $userId)
+                    ->withAttribute('user',       $claims)
+                ;
+            } catch (RuntimeException $e) {
+                // invalid or expired token
+                // if this is a protected route, reject immediately
+                if (! PathMatcher::isMatch($path, $public)) {
+                    return new JsonResponse(
+                        ['error' => true, 'message' => $e->getMessage()],
+                        401
+                    );
+                }
+                // else we swallow the error on public routes
+            }
         }
 
-        // ② Require “Bearer …” header
-        $auth = $req->getHeaderLine('Authorization');
-        if (! str_starts_with($auth, 'Bearer ')) {
-            return new JsonResponse(['error' => true, 'message' => 'Missing token'], 401);
+        // 2) If it's a protected route and we still have no user_id, reject
+        if (
+            ! PathMatcher::isMatch($path, $public)
+            && (int)$req->getAttribute('user_id', 0) <= 0
+        ) {
+            return new JsonResponse(
+                ['error' => true, 'message' => 'Missing or invalid token'],
+                401
+            );
         }
-
-        // ③ Decode token
-        $token  = substr($auth, 7);
-        try {
-            $claims = $this->jwt->decode($token);
-        } catch (RuntimeException) {
-            return new JsonResponse(['error' => true, 'message' => 'Invalid token'], 401);
-        }
-
-        // ④ Pick *any* common key that might store the user ID
-        $userId = (int) ($claims['sub']
-            ?? $claims['uid']
-            ?? $claims['id']
-            ?? 0);
-
-        // ⑤ Stick everything on the request (old + new names)
-        $req = $req
-            ->withAttribute('jwt_claims', $claims)  // whole payload
-            ->withAttribute('user_id',    $userId)  // preferred
-            ->withAttribute('user',       $claims); // legacy
 
         return $handler->handle($req);
     }
