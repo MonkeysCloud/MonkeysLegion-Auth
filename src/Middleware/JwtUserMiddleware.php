@@ -13,6 +13,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use RuntimeException;
 
+
 final class JwtUserMiddleware implements MiddlewareInterface
 {
     public function __construct(
@@ -26,26 +27,36 @@ final class JwtUserMiddleware implements MiddlewareInterface
         $path   = $req->getUri()->getPath();
         $public = $this->config->get('auth.public_paths', []);
 
+        // ① Skip JWT check on public paths
         if (PathMatcher::isMatch($path, $public)) {
             return $handler->handle($req);
         }
 
+        // ② Require “Bearer …” header
         $auth = $req->getHeaderLine('Authorization');
-        if (!str_starts_with($auth, 'Bearer ')) {
+        if (! str_starts_with($auth, 'Bearer ')) {
             return new JsonResponse(['error' => true, 'message' => 'Missing token'], 401);
         }
 
-        $token = substr($auth, 7);
+        // ③ Decode token
+        $token  = substr($auth, 7);
         try {
             $claims = $this->jwt->decode($token);
-        } catch (RuntimeException $e) {
+        } catch (RuntimeException) {
             return new JsonResponse(['error' => true, 'message' => 'Invalid token'], 401);
         }
 
+        // ④ Pick *any* common key that might store the user ID
+        $userId = (int) ($claims['sub']
+            ?? $claims['uid']
+            ?? $claims['id']
+            ?? 0);
+
+        // ⑤ Stick everything on the request (old + new names)
         $req = $req
-            ->withAttribute('jwt_claims', $claims)
-            ->withAttribute('user_id',    (int)($claims['sub'] ?? 0))
-            ->withAttribute('user',       $claims);
+            ->withAttribute('jwt_claims', $claims)  // whole payload
+            ->withAttribute('user_id',    $userId)  // preferred
+            ->withAttribute('user',       $claims); // legacy
 
         return $handler->handle($req);
     }
