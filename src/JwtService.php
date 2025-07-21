@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MonkeysLegion\Auth;
 
+use Firebase\JWT\ExpiredException;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use RuntimeException;
@@ -51,14 +52,12 @@ final class JwtService
      * @param string $token
      * @return object
      * @throws RuntimeException on invalid token
+     * @throws \JsonException
      */
     public function verify(string $token): object
     {
-        try {
-            return JWT::decode($token, new Key($this->secret, 'HS256'));
-        } catch (\Throwable $e) {
-            throw new RuntimeException('Invalid JWT token', 0, $e);
-        }
+        $data = $this->decode($token);
+        return (object)$data;
     }
 
     /**
@@ -71,10 +70,16 @@ final class JwtService
      */
     public function decode(string $token): array
     {
-        $payload = $this->verify($token);
+        try {
+            // direct decode to catch ExpiredException specifically
+            $payload = JWT::decode($token, new Key($this->secret, 'HS256'));
+        } catch (ExpiredException $e) {
+            throw new RuntimeException('Token expired', 401, $e);
+        } catch (\Throwable $e) {
+            throw new RuntimeException('Invalid token', 401, $e);
+        }
 
-        $data = json_decode(json_encode($payload), true, 512, JSON_THROW_ON_ERROR);
-
-        return $data;
+        // convert stdClass payload to an associative array
+        return json_decode(json_encode($payload), true, 512, JSON_THROW_ON_ERROR);
     }
 }
