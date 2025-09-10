@@ -7,16 +7,19 @@ use App\Entity\User;
 use MonkeysLegion\Repository\EntityRepository;
 use MonkeysLegion\Repository\RepositoryFactory;
 use RuntimeException;
+use PDOException;
 
 /**
- * Service for handling user authentication, including registration and login.
+ * Authentication service with:
+ *  - register/login
+ *  - stateless sliding ACCESS tokens (JWT, short-lived)
  *
- * This service provides methods to register new users and authenticate existing users
- * using email and password. It uses a password hasher for secure password storage
- * and a JWT service for issuing tokens upon successful login.
+ * No refresh-store is required. The client refreshes near expiry while active.
  */
 final class AuthService
 {
+    private const DEFAULT_ACCESS_TTL_SEC = 1800; // 30 minutes
+
     /** @var EntityRepository<User> */
     private EntityRepository $users;
 
@@ -25,16 +28,12 @@ final class AuthService
         private PasswordHasher    $hasher,
         private JwtService        $jwt,
     ) {
-        // resolve the repository for the User entity
         $this->users = $this->repoFactory->getRepository(User::class);
     }
 
     /**
      * Registers a new user with the given email and password.
      *
-     * @param string $email The email address of the user.
-     * @param string $password The password for the user.
-     * @return User The newly created user entity.
      * @throws RuntimeException if the email is already registered.
      */
     public function register(string $email, string $password): User
@@ -44,11 +43,10 @@ final class AuthService
             ->setPasswordHash($this->hasher->hash($password));
 
         try {
-            // save() populates $user->id automatically
-            $this->users->save($user);
+            $this->users->save($user); // save() populates id
         } catch (PDOException $e) {
             // 23000 = integrity-constraint violation, 1062 = duplicate entry
-            if ($e->getCode() === '23000' || $e->errorInfo[1] === 1062) {
+            if ($e->getCode() === '23000' || (($e->errorInfo[1] ?? null) === 1062)) {
                 throw new RuntimeException('Email already registered', 409, $e);
             }
             throw $e;
@@ -58,11 +56,8 @@ final class AuthService
     }
 
     /**
-     * Logs in a user with the given email and password.
+     * Logs in a user and returns a short-lived ACCESS JWT (stateless).
      *
-     * @param string $email The email address of the user.
-     * @param string $password The password for the user.
-     * @return string JWT token for the authenticated user.
      * @throws RuntimeException if the credentials are invalid.
      */
     public function login(string $email, string $password): string
@@ -77,6 +72,51 @@ final class AuthService
             throw new RuntimeException('Invalid credentials');
         }
 
-        return $this->jwt->issue(['sub' => $user->getId()]);
+        return $this->mintAccessTokenFor($user->getId(), self::DEFAULT_ACCESS_TTL_SEC);
+    }
+
+    /**
+     * Mint a short-lived ACCESS token (JWT) for a user.
+     * Adds iat/nbf/exp so the client can decode expiry.
+     * Optionally includes a per-user token version if your User entity exposes getTokenVersion().
+     */
+    public function mintAccessTokenFor(int $userId, int $ttlSeconds = self::DEFAULT_ACCESS_TTL_SEC): string
+    {
+        $now = time();
+
+        // Optional per-user token version (global revoke lever without extra tables).
+        $ver = 1;
+        try {
+            /** @var User|null $u */
+            $u = $this->users->find($userId);
+            if ($u && method_exists($u, 'getTokenVersion')) {
+                $maybe = (int) $u->getTokenVersion();
+                if ($maybe > 0) {
+                    $ver = $maybe;
+                }
+            }
+        } catch (\Throwable) {
+            // Best-effort; ignore if repository/User doesn't provide token version
+        }
+
+        $claims = [
+            'sub' => $userId,
+            'ver' => $ver,        // harmless if you don't use it in validation
+            'iat' => $now,
+            'nbf' => $now,
+            'exp' => $now + $ttlSeconds,
+        ];
+
+        return $this->jwt->issue($claims);
+    }
+
+    /**
+     * Re-mint an ACCESS token for an already-authenticated request (sliding sessions).
+     * Call this from /auth/refresh after your middleware parsed the current token
+     * and set request attribute "user_id".
+     */
+    public function refreshAccessForUser(int $userId, int $ttlSeconds = self::DEFAULT_ACCESS_TTL_SEC): string
+    {
+        return $this->mintAccessTokenFor($userId, $ttlSeconds);
     }
 }
