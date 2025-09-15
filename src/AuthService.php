@@ -119,4 +119,20 @@ final class AuthService
     {
         return $this->mintAccessTokenFor($userId, $ttlSeconds);
     }
+
+    /**
+     * Decode a token with extra leeway for refresh operations, returning claims as an associative array.
+     * This allows tokens that are just expired to be accepted within the grace period.
+     *
+     * @param string $token
+     * @param int $graceSeconds Additional seconds of leeway to allow (beyond configured leeway)
+     * @return array<string,mixed>
+     * @throws RuntimeException on invalid token
+     * @throws \JsonException
+     */
+    public function decodeForRefresh(string $token, int $graceSeconds = 600): array
+    {
+        // Delegate to JwtService so we keep verification in one place
+        return $this->jwt->decodeWithExtraLeeway($token, $graceSeconds);
+    }
 }
