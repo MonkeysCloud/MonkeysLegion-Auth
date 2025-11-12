@@ -110,4 +110,49 @@ final class JwtService
             JWT::$leeway = $orig; // always restore
         }
     }
+
+    /**
+     * Get the default TTL for issued tokens.
+     *
+     * @return int Returns the default TTL (in seconds) for issued tokens.
+     */
+    public function getTtl(): int
+    {
+        return $this->ttl;
+    }
+
+    /**
+     * Get the configured leeway for token verification.
+     *
+     * @return int Returns the configured leeway (in seconds) for token verification.
+     */
+    public function getLeeway(): int
+    {
+        return $this->leeway;
+    }
+
+    /**
+     * Get the configured nbf skew for token issuance.
+     *
+     * @return int Returns the configured nbf skew (in seconds) for token issuance.
+     */
+    public function getNbfSkew(): int
+    {
+        return $this->nbfSkew;
+    }
+
+    /**
+     * Extract the expiration time (exp claim) from a JWT token.
+     *
+     * @param string $token The JWT token.
+     *
+     * @return int The expiration time as a Unix timestamp, or 0 if not present.
+     * @throws RuntimeException on invalid token
+     * @throws \JsonException
+     */
+    public function getExpFrom(string $token): int
+    {
+        $claims = $this->decode($token);
+        return (int) ($claims['exp'] ?? 0);
+    }
 }

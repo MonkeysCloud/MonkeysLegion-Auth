@@ -80,34 +80,23 @@ final class AuthService
      * Adds iat/nbf/exp so the client can decode expiry.
      * Optionally includes a per-user token version if your User entity exposes getTokenVersion().
      */
-    public function mintAccessTokenFor(int $userId, int $ttlSeconds = self::DEFAULT_ACCESS_TTL_SEC): string
+    public function mintAccessTokenFor(int $userId): string
     {
-        $now = time();
-
-        // Optional per-user token version (global revoke lever without extra tables).
         $ver = 1;
         try {
             /** @var User|null $u */
             $u = $this->users->find($userId);
             if ($u && method_exists($u, 'getTokenVersion')) {
                 $maybe = (int) $u->getTokenVersion();
-                if ($maybe > 0) {
-                    $ver = $maybe;
-                }
+                if ($maybe > 0) $ver = $maybe;
             }
-        } catch (\Throwable) {
-            // Best-effort; ignore if repository/User doesn't provide token version
-        }
+        } catch (\Throwable) {}
 
-        $claims = [
+        // No iat/nbf/exp here — JwtService adds them from auth.mlc
+        return $this->jwt->issue([
             'sub' => $userId,
-            'ver' => $ver,        // harmless if you don't use it in validation
-            'iat' => $now,
-            'nbf' => $now,
-            'exp' => $now + $ttlSeconds,
-        ];
-
-        return $this->jwt->issue($claims);
+            'ver' => $ver,
+        ]);
     }
 
     /**
