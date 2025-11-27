@@ -33,4 +33,14 @@ interface TokenStorageInterface
      * Remove all tokens for a user.
      */
     public function removeAllForUser(int|string $userId): void;
+
+    /**
+     * Add a token to the blacklist.
+     */
+    public function blacklist(string $tokenId, int $ttl): void;
+
+    /**
+     * Check if a token is blacklisted.
+     */
+    public function isBlacklisted(string $tokenId): bool;
 }

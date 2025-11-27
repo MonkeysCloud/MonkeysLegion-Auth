@@ -28,4 +28,14 @@ interface AuthenticatableInterface
      * Get the token version for token invalidation.
      */
     public function getTokenVersion(): int;
+
+    /**
+     * Check if 2FA is enabled for the user.
+     */
+    public function hasTwoFactorEnabled(): bool;
+
+    /**
+     * Get the 2FA secret for the user.
+     */
+    public function getTwoFactorSecret(): ?string;
 }

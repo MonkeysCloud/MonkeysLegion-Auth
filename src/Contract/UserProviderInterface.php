@@ -30,4 +30,17 @@ interface UserProviderInterface
      * Update the user's token version (for token invalidation).
      */
     public function incrementTokenVersion(int|string $userId): void;
+
+    /**
+     * Create a new user.
+     *
+     * @param array<string, mixed> $attributes
+     * @throws \RuntimeException If creation fails
+     */
+    public function create(array $attributes): AuthenticatableInterface;
+
+    /**
+     * Update user's password hash.
+     */
+    public function updatePassword(int|string $userId, string $passwordHash): void;
 }

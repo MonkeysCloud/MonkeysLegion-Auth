@@ -62,22 +62,25 @@ final class AuthService
         // Rate limit registration attempts
         $this->checkRateLimit("register:{$ipAddress}", 10, 3600);
 
+        // Check if user already exists
+        if ($this->users->findByEmail($email) !== null) {
+            throw new UserAlreadyExistsException('Email already registered');
+        }
+
         try {
-            $user = $this->users->findByCredentials(array_merge(
-                ['email' => $email, 'password_hash' => $this->hasher->hash($password)],
+            $user = $this->users->create(array_merge(
+                [
+                    'email' => $email,
+                    'password_hash' => $this->hasher->hash($password),
+                ],
                 $attributes
             ));
-
-            // This is actually creation, UserProvider should handle it
-            // For now, we'll assume findByCredentials can create
-            if (!$user) {
-                throw new UserAlreadyExistsException('Failed to create user');
-            }
 
             $this->dispatch(new UserRegistered($user, $ipAddress));
 
             return $user;
         } catch (PDOException $e) {
+            // Handle race condition: user created between check and insert
             if ($e->getCode() === '23000' || (($e->errorInfo[1] ?? null) === 1062)) {
                 throw new UserAlreadyExistsException('Email already registered');
             }
@@ -251,41 +254,17 @@ final class AuthService
             throw new InvalidCredentialsException('Current password is incorrect');
         }
 
-        // Update password (UserProvider should handle this)
-        // $this->users->updatePassword($user->getAuthIdentifier(), $this->hasher->hash($newPassword));
+        // Update password
+        $this->users->updatePassword(
+            $user->getAuthIdentifier(),
+            $this->hasher->hash($newPassword)
+        );
 
         // Invalidate all tokens
         $this->users->incrementTokenVersion($user->getAuthIdentifier());
         $this->tokenStorage?->removeAllForUser($user->getAuthIdentifier());
 
         $this->dispatch(new PasswordChanged($user->getAuthIdentifier(), $ipAddress));
-    }
-
-    /**
-     * Issue new token pair for a user.
-     */
-    public function issueTokenPair(AuthenticatableInterface $user): TokenPair
-    {
-        $now = time();
-        $userId = $user->getAuthIdentifier();
-        $tokenVersion = $user->getTokenVersion();
-
-        $accessToken = $this->jwt->issueAccessToken([
-            'sub' => $userId,
-            'ver' => $tokenVersion,
-        ]);
-
-        $refreshToken = $this->jwt->issueRefreshToken([
-            'sub' => $userId,
-            'ver' => $tokenVersion,
-        ]);
-
-        return new TokenPair(
-            accessToken: $accessToken,
-            refreshToken: $refreshToken,
-            accessExpiresAt: $now + $this->jwt->getAccessTtl(),
-            refreshExpiresAt: $now + $this->jwt->getRefreshTtl(),
-        );
     }
 
     /**
@@ -328,6 +307,33 @@ final class AuthService
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Issue new token pair for a user.
+     */
+    public function issueTokenPair(AuthenticatableInterface $user): TokenPair
+    {
+        $now = time();
+        $userId = $user->getAuthIdentifier();
+        $tokenVersion = $user->getTokenVersion();
+
+        $accessToken = $this->jwt->issueAccessToken([
+            'sub' => $userId,
+            'ver' => $tokenVersion,
+        ]);
+
+        $refreshToken = $this->jwt->issueRefreshToken([
+            'sub' => $userId,
+            'ver' => $tokenVersion,
+        ]);
+
+        return new TokenPair(
+            accessToken: $accessToken,
+            refreshToken: $refreshToken,
+            accessExpiresAt: $now + $this->jwt->getAccessTtl(),
+            refreshExpiresAt: $now + $this->jwt->getRefreshTtl(),
+        );
     }
 
     private function completeLogin(
