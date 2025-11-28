@@ -2,19 +2,17 @@
 
 declare(strict_types=1);
 
-namespace MonkeysLegion\Auth\Policy;
+namespace MonkeysLegion\Auth\Contract;
 
 /**
- * Interface for authorization policies.
+ * Contract for authorization policies.
  */
 interface PolicyInterface
 {
     /**
      * Handle before checks. Return true to allow, false to deny, null to defer.
      *
-     * @param object|null $user    The authenticated user
-     * @param string      $ability The ability being checked
-     * @param object|null $model   The model being accessed
+     * Use this for super-admin bypass or other global checks.
      */
     public function before(?object $user, string $ability, ?object $model = null): ?bool;
 }
