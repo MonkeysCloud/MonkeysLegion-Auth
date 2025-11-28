@@ -1,5 +1,5 @@
 {
-  "name": "monkeyscloud/monkeyslegion-auth",
+    "name": "monkeyscloud/monkeyslegion-auth",
     "description": "Comprehensive authentication and authorization package with JWT, RBAC, 2FA, OAuth, and API keys",
     "type": "library",
     "license": "MIT",
@@ -52,6 +52,11 @@
     },
     "config": {
         "sort-packages": true
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "2.0.x-dev"
+        }
     },
     "minimum-stability": "dev",
     "prefer-stable": true
