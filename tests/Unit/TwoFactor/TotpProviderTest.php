@@ -49,10 +49,19 @@ class TotpProviderTest extends TestCase
         $this->assertStringContainsString(urlencode($email), $uri);
     }
 
+    public function testGetQrCodeUri(): void
+    {
+        $uri = 'otpauth://totp/MyApp:test%40example.com?secret=JBSWY3DPEHPK3PXP';
+        $qrCode = $this->totp->getQrCodeUri($uri);
+
+        $this->assertStringContainsString('https://api.qrserver.com', $qrCode);
+        $this->assertStringContainsString(rawurlencode($uri), $qrCode);
+    }
+
     public function testVerifyValidCode(): void
     {
         $secret = $this->totp->generateSecret();
-        
+
         // Generate current code
         $code = $this->generateTotpCode($secret);
 
@@ -93,7 +102,7 @@ class TotpProviderTest extends TestCase
         $codes = $this->totp->generateBackupCodes(8);
 
         $this->assertCount(8, $codes);
-        
+
         foreach ($codes as $code) {
             $this->assertIsString($code);
             $this->assertEquals(8, strlen($code));
@@ -169,9 +178,9 @@ class TotpProviderTest extends TestCase
     {
         $timeStep = (int) floor(time() / 30);
         $secretBytes = $this->base32Decode($secret);
-        $time = pack('J', $timeStep);
+        $time = pack('N', $timeStep >> 32) . pack('N', $timeStep & 0xFFFFFFFF);
         $hash = hash_hmac('sha1', $time, $secretBytes, true);
-        
+
         $offset = ord($hash[19]) & 0x0F;
         $code = (
             ((ord($hash[$offset]) & 0x7F) << 24) |

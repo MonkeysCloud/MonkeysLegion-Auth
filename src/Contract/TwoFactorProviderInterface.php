@@ -25,6 +25,11 @@ interface TwoFactorProviderInterface
     public function verify(string $secret, string $code): bool;
 
     /**
+     * Generate a QR Code URI for the provisioning URI.
+     */
+    public function getQrCodeUri(string $uri): string;
+
+    /**
      * Generate recovery codes.
      *
      * @return string[]

@@ -40,6 +40,11 @@ final class TotpProvider implements TwoFactorProviderInterface
         return "otpauth://totp/{$label}?{$params}";
     }
 
+    public function getQrCodeUri(string $uri): string
+    {
+        return 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . rawurlencode($uri);
+    }
+
     public function verify(string $secret, string $code): bool
     {
         $code = preg_replace('/\s+/', '', $code);
@@ -96,7 +101,12 @@ final class TotpProvider implements TwoFactorProviderInterface
     private function generateCode(string $secret, int $timeStep): string
     {
         $secretBytes = $this->base32Decode($secret);
-        $time = pack('J', $timeStep);
+
+        // Pack time into 64-bit big-endian binary string (RFC 4226/6238 requirement)
+        // usage of pack('J') depends on PHP version/architecture, so we manually pack
+        // high and low 32-bit words to ensure correct byte order on all systems.
+        $time = pack('N', $timeStep >> 32) . pack('N', $timeStep & 0xFFFFFFFF);
+
         $hash = hash_hmac('sha1', $time, $secretBytes, true);
 
         $offset = ord($hash[19]) & 0x0F;

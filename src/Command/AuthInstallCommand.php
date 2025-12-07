@@ -6,7 +6,7 @@ namespace MonkeysLegion\Auth\Command;
 
 use MonkeysLegion\Cli\Console\Attributes\Command as CommandAttr;
 use MonkeysLegion\Cli\Console\Command;
-use MonkeysLegion\Database\ConnectionManager;
+use MonkeysLegion\Database\Contracts\ConnectionInterface;
 use PDO;
 use PDOException;
 
@@ -36,7 +36,7 @@ final class AuthInstallCommand extends Command
     ];
 
     public function __construct(
-        private readonly ConnectionManager $db,
+        private readonly ConnectionInterface $db,
     ) {}
 
     protected function handle(): int
@@ -44,7 +44,7 @@ final class AuthInstallCommand extends Command
         $this->printHeader();
 
         try {
-            $connection = $this->db->getConnection();
+            $connection = $this->db->pdo();
 
             // Check for prerequisites
             if (!$this->checkPrerequisites($connection)) {
