@@ -28,9 +28,9 @@ final class AuthInstallCommand extends Command
     }
 
     /**
-     * @param array<string> $argv
+     * @return int
      */
-    public function execute(array $argv): int
+    public function handle(): int
     {
         // 1. Resolve source stub
         $stub = $this->migrationSourceDir . '/0000_00_00_000000_auth_tables.sql';
