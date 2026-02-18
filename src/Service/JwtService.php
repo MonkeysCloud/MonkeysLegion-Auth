@@ -92,7 +92,10 @@ final class JwtService
             $payload = JWT::decode($token, new Key($this->secret, $this->algorithm));
             return $this->objectToArray($payload);
         } catch (ExpiredException $e) {
-            throw new TokenExpiredException('Token has expired', ['original' => $e->getMessage()]);
+            throw new TokenExpiredException('Token has expired', [
+                'original' => $e->getMessage(),
+                'expired_at' => $e->getTimestamp(),
+            ]);
         } catch (\Throwable $e) {
             throw new TokenInvalidException('Invalid token', ['original' => $e->getMessage()]);
         } finally {
