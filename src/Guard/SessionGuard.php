@@ -85,12 +85,13 @@ final class SessionGuard implements StatefulGuardInterface
             }
         }
 
-        // Try remember-me cookie
+        // Try remember-me cookie (format: "userId|token")
         $cookies = $request->getCookieParams();
-        $rememberToken = $cookies[self::REMEMBER_KEY] ?? null;
+        $rememberValue = $cookies[self::REMEMBER_KEY] ?? null;
 
-        if (is_string($rememberToken) && $rememberToken !== '') {
-            $user = $this->users->findByRememberToken($rememberToken);
+        if (is_string($rememberValue) && str_contains($rememberValue, '|')) {
+            [$userId, $rememberToken] = explode('|', $rememberValue, 2);
+            $user = $this->users->findByRememberToken($userId, $rememberToken);
             if ($user !== null) {
                 $this->login($user, false);
                 return $user;
