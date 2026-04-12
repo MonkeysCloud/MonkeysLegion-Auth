@@ -162,6 +162,32 @@ class FakeRequest implements ServerRequestInterface
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ██ TEST FIXTURES ████████████████████████████████████████████
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Policy fixture that counts instantiations so tests can assert
+ * that Gate caches policy instances instead of creating new ones.
+ */
+final class CountingPolicy
+{
+    public function __construct()
+    {
+        AuthV2Test::$policyCacheCounter++;
+    }
+
+    public function view(mixed $user, mixed $model): bool
+    {
+        return true;
+    }
+
+    public function edit(mixed $user, mixed $model): bool
+    {
+        return false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ██ TEST SUITE ████████████████████████████████████████████████
 // ═══════════════════════════════════════════════════════════════
 
@@ -1627,22 +1653,10 @@ final class AuthV2Test extends TestCase
 
     public function test_gate_caches_policy_instances(): void
     {
-        // A policy that records how many times it was instantiated.
-        $counter = new class { public static int $n = 0; };
-
-        eval('
-            namespace MonkeysLegion\Auth\Tests;
-            class CachingTestPolicy {
-                public function __construct() { \MonkeysLegion\Auth\Tests\AuthV2Test::$policyCacheCounter++; }
-                public function view($user, $model): bool { return true; }
-                public function edit($user, $model): bool { return false; }
-            }
-        ');
-
         static::$policyCacheCounter = 0;
 
         $gate = new Gate();
-        $gate->policy(\stdClass::class, \MonkeysLegion\Auth\Tests\CachingTestPolicy::class);
+        $gate->policy(\stdClass::class, CountingPolicy::class);
 
         $user  = new FakeUser(1, 't@t.com', password_hash('p', PASSWORD_BCRYPT));
         $model = new \stdClass();
@@ -1655,7 +1669,7 @@ final class AuthV2Test extends TestCase
         $this->assertSame(1, static::$policyCacheCounter);
     }
 
-    /** @internal Used by test_gate_caches_policy_instances */
+    /** @internal Counter shared with CountingPolicy fixture */
     public static int $policyCacheCounter = 0;
 
     // ── OAuthUser raw data safety ──────────────────────────────

@@ -137,6 +137,7 @@ final class JwtService
      * Decode with extra leeway — for refresh/revocation operations.
      *
      * @return array<string, mixed>
+     * @throws TokenExpiredException
      * @throws TokenInvalidException
      */
     public function decodeWithLeeway(string $token, int $extraLeeway): array
