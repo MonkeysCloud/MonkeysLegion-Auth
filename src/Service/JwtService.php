@@ -130,8 +130,34 @@ final class JwtService
      */
     public function decode(string $token): array
     {
+        return $this->decodeInternal($token, $this->leeway);
+    }
+
+    /**
+     * Decode with extra leeway — for refresh/revocation operations.
+     *
+     * @return array<string, mixed>
+     * @throws TokenInvalidException
+     */
+    public function decodeWithLeeway(string $token, int $extraLeeway): array
+    {
+        return $this->decodeInternal($token, max($this->leeway, $extraLeeway));
+    }
+
+    // ── Token Introspection ────────────────────────────────────
+
+    /**
+     * Internal decode implementation — saves/restores JWT::$leeway around
+     * the call to avoid mutating the global state for concurrent requests.
+     *
+     * @return array<string, mixed>
+     * @throws TokenExpiredException
+     * @throws TokenInvalidException
+     */
+    private function decodeInternal(string $token, int $leeway): array
+    {
         $originalLeeway = JWT::$leeway;
-        JWT::$leeway    = $this->leeway;
+        JWT::$leeway    = $leeway;
 
         try {
             $payload = JWT::decode($token, $this->key);
@@ -148,31 +174,6 @@ final class JwtService
             JWT::$leeway = $originalLeeway;
         }
     }
-
-    /**
-     * Decode with extra leeway — for refresh/revocation operations.
-     *
-     * @return array<string, mixed>
-     * @throws TokenInvalidException
-     */
-    public function decodeWithLeeway(string $token, int $extraLeeway): array
-    {
-        $originalLeeway = JWT::$leeway;
-        JWT::$leeway    = max($this->leeway, $extraLeeway);
-
-        try {
-            $payload = JWT::decode($token, $this->key);
-            return $this->objectToArray($payload);
-        } catch (\Throwable $e) {
-            throw new TokenInvalidException('Invalid token.', [
-                'reason' => $e->getMessage(),
-            ]);
-        } finally {
-            JWT::$leeway = $originalLeeway;
-        }
-    }
-
-    // ── Token Introspection ────────────────────────────────────
 
     /**
      * Get token expiration without full verification.

@@ -17,9 +17,13 @@ namespace MonkeysLegion\Auth\Storage;
 use MonkeysLegion\Auth\Contract\TokenStorageInterface;
 
 /**
- * In-memory token storage — for testing.
+ * In-memory token storage — for testing only.
  *
- * SECURITY: Not suitable for production (no persistence across processes).
+ * ⚠️ WARNING: NOT suitable for production use.
+ * This implementation has NO persistence across processes or requests.
+ * Use a Redis, database, or cache-backed implementation in production.
+ *
+ * @internal Use only in unit/integration tests.
  */
 final class InMemoryTokenStorage implements TokenStorageInterface
 {

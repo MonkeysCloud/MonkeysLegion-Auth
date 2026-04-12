@@ -1494,4 +1494,206 @@ final class AuthV2Test extends TestCase
         $this->assertNotSame($oldId, $session->getId());
         $this->assertFalse($session->has('data'));
     }
+
+    // ── WebAuthn Guard ─────────────────────────────────────────
+
+    public function test_webauthn_guard_authenticates_from_attribute(): void
+    {
+        $users = new InMemoryUserProvider();
+        $user  = new FakeUser(1, 'john@example.com', password_hash('password', PASSWORD_BCRYPT));
+        $users->addUser($user);
+
+        $guard   = new \MonkeysLegion\Auth\Guard\WebAuthnGuard($users);
+        $request = (new FakeRequest())->withAttribute('webauthn.user_handle', 1);
+
+        $result = $guard->authenticate($request);
+        $this->assertNotNull($result);
+        $this->assertSame(1, $result->getAuthIdentifier());
+        $this->assertSame('webauthn', $guard->name());
+        $this->assertTrue($guard->check());
+        $this->assertFalse($guard->guest());
+        $this->assertSame(1, $guard->id());
+    }
+
+    public function test_webauthn_guard_returns_null_without_attribute(): void
+    {
+        $users = new InMemoryUserProvider();
+        $guard = new \MonkeysLegion\Auth\Guard\WebAuthnGuard($users);
+
+        $result = $guard->authenticate(new FakeRequest());
+        $this->assertNull($result);
+        $this->assertTrue($guard->guest());
+        $this->assertFalse($guard->check());
+        $this->assertNull($guard->id());
+        $this->assertNull($guard->user());
+    }
+
+    public function test_webauthn_guard_returns_null_for_unknown_user(): void
+    {
+        $users   = new InMemoryUserProvider();
+        $guard   = new \MonkeysLegion\Auth\Guard\WebAuthnGuard($users);
+        $request = (new FakeRequest())->withAttribute('webauthn.user_handle', 9999);
+
+        $this->assertNull($guard->authenticate($request));
+    }
+
+    public function test_webauthn_guard_validate(): void
+    {
+        $users = new InMemoryUserProvider();
+        $user  = new FakeUser(1, 'john@example.com', password_hash('password', PASSWORD_BCRYPT));
+        $users->addUser($user);
+
+        $guard = new \MonkeysLegion\Auth\Guard\WebAuthnGuard($users);
+
+        $this->assertTrue($guard->validate(['user_handle' => 1]));
+        $this->assertFalse($guard->validate(['user_handle' => 9999]));
+        $this->assertFalse($guard->validate(['user_handle' => '']));
+        $this->assertFalse($guard->validate(['user_handle' => null]));
+        $this->assertFalse($guard->validate([]));
+    }
+
+    public function test_webauthn_guard_in_composite(): void
+    {
+        $users = new InMemoryUserProvider();
+        $user  = new FakeUser(42, 'pass@example.com', password_hash('password', PASSWORD_BCRYPT));
+        $users->addUser($user);
+        $users->addApiKey(42, 'ak-test');
+
+        $composite = new CompositeGuard([
+            new \MonkeysLegion\Auth\Guard\WebAuthnGuard($users),
+            new ApiKeyGuard($users),
+        ]);
+
+        // WebAuthn guard should win (first in list)
+        $request = (new FakeRequest())->withAttribute('webauthn.user_handle', 42);
+        $result  = $composite->authenticate($request);
+
+        $this->assertNotNull($result);
+        $this->assertSame(42, $result->getAuthIdentifier());
+        $this->assertSame('webauthn', $composite->name());
+    }
+
+    // ── PasskeyAuthenticated Event ─────────────────────────────
+
+    public function test_passkey_authenticated_event(): void
+    {
+        $event = new \MonkeysLegion\Auth\Event\PasskeyAuthenticated(
+            userId: 42,
+            credentialId: 'cred-abc123',
+            ipAddress: '10.0.0.1',
+            userAgent: 'TestBrowser/1.0',
+        );
+
+        $this->assertSame(42, $event->userId);
+        $this->assertSame('cred-abc123', $event->credentialId);
+        $this->assertSame('10.0.0.1', $event->ipAddress);
+        $this->assertSame('TestBrowser/1.0', $event->userAgent);
+        $this->assertNotEmpty($event->correlationId);
+        $this->assertGreaterThan(0.0, $event->timestamp);
+    }
+
+    // ── Passkey Attribute ──────────────────────────────────────
+
+    public function test_passkey_attribute_defaults(): void
+    {
+        $attr = new \MonkeysLegion\Auth\Attribute\Passkey();
+        $this->assertSame('preferred', $attr->userVerification);
+    }
+
+    public function test_passkey_attribute_custom_verification(): void
+    {
+        $attr = new \MonkeysLegion\Auth\Attribute\Passkey(userVerification: 'required');
+        $this->assertSame('required', $attr->userVerification);
+    }
+
+    // ── RateLimitMiddleware Trusted Proxies ────────────────────
+
+    public function test_rate_limit_middleware_accepts_trusted_proxies(): void
+    {
+        $middleware = new \MonkeysLegion\Auth\Middleware\RateLimitMiddleware(
+            limiter: new InMemoryRateLimiter(),
+            maxAttempts: 100,
+            decaySeconds: 60,
+            trustedProxies: ['10.0.0.1', '10.0.0.2'],
+        );
+
+        $this->assertInstanceOf(
+            \MonkeysLegion\Auth\Middleware\RateLimitMiddleware::class,
+            $middleware,
+        );
+    }
+
+    // ── Gate Policy Caching ────────────────────────────────────
+
+    public function test_gate_caches_policy_instances(): void
+    {
+        // A policy that records how many times it was instantiated.
+        $counter = new class { public static int $n = 0; };
+
+        eval('
+            namespace MonkeysLegion\Auth\Tests;
+            class CachingTestPolicy {
+                public function __construct() { \MonkeysLegion\Auth\Tests\AuthV2Test::$policyCacheCounter++; }
+                public function view($user, $model): bool { return true; }
+                public function edit($user, $model): bool { return false; }
+            }
+        ');
+
+        static::$policyCacheCounter = 0;
+
+        $gate = new Gate();
+        $gate->policy(\stdClass::class, \MonkeysLegion\Auth\Tests\CachingTestPolicy::class);
+
+        $user  = new FakeUser(1, 't@t.com', password_hash('p', PASSWORD_BCRYPT));
+        $model = new \stdClass();
+
+        $gate->allows($user, 'view', $model);
+        $gate->allows($user, 'edit', $model);
+        $gate->allows($user, 'view', $model);
+
+        // Only one instantiation despite three checks
+        $this->assertSame(1, static::$policyCacheCounter);
+    }
+
+    /** @internal Used by test_gate_caches_policy_instances */
+    public static int $policyCacheCounter = 0;
+
+    // ── OAuthUser raw data safety ──────────────────────────────
+
+    public function test_oauth_user_to_array_excludes_raw(): void
+    {
+        $oauthUser = new OAuthUser(
+            providerId: '123',
+            provider: 'google',
+            email: 'test@google.com',
+            raw: ['access_token' => 'secret_tok', 'refresh_token' => 'rt'],
+        );
+
+        $array = $oauthUser->toArray();
+
+        $this->assertArrayNotHasKey('raw', $array);
+        $this->assertArrayNotHasKey('access_token', $array);
+        $this->assertSame('test@google.com', $array['email']);
+    }
+
+    public function test_oauth_user_get_raw_returns_data(): void
+    {
+        $rawData   = ['access_token' => 'tok_123', 'scope' => 'email profile'];
+        $oauthUser = new OAuthUser(
+            providerId: '456',
+            provider: 'github',
+            raw: $rawData,
+        );
+
+        $this->assertSame($rawData, $oauthUser->getRaw());
+    }
+
+    // ── WebAuthnCredentialInterface ────────────────────────────
+
+    public function test_webauthn_credential_interface_exists(): void
+    {
+        $this->assertTrue(
+            interface_exists(\MonkeysLegion\Auth\Contract\WebAuthnCredentialInterface::class),
+        );
+    }
 }

@@ -19,6 +19,7 @@
         "psr/simple-cache": "^3.0"
     },
     "require-dev": {
+        "phpstan/phpstan": "^2.0",
         "phpunit/phpunit": "^11.0"
     },
     "suggest": {
@@ -26,6 +27,7 @@
         "ext-openssl": "Required for RS256/ES256 asymmetric JWT signing",
         "monkeyscloud/monkeyslegion-database": "Database-backed user providers and RBAC storage",
         "monkeyscloud/monkeyslegion-cli": "CLI commands for auth management",
+        "monkeyscloud/monkeyslegion-webauthn": "WebAuthn/FIDO2 passkey authentication via WebAuthnGuard",
         "nyholm/psr7": "PSR-7 implementation for middleware responses"
     },
     "autoload": {
