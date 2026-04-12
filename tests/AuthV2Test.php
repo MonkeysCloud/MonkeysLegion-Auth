@@ -31,6 +31,7 @@ use MonkeysLegion\Auth\Guard\ApiKeyGuard;
 use MonkeysLegion\Auth\Guard\AuthManager;
 use MonkeysLegion\Auth\Guard\CompositeGuard;
 use MonkeysLegion\Auth\Guard\JwtGuard;
+use MonkeysLegion\Auth\Guard\SessionGuard;
 use MonkeysLegion\Auth\Policy\Gate;
 use MonkeysLegion\Auth\RBAC\InMemoryRoleRepository;
 use MonkeysLegion\Auth\RBAC\RbacService;
@@ -38,6 +39,7 @@ use MonkeysLegion\Auth\RateLimit\InMemoryRateLimiter;
 use MonkeysLegion\Auth\Service\AuthService;
 use MonkeysLegion\Auth\Service\JwtService;
 use MonkeysLegion\Auth\Service\PasswordHasher;
+use MonkeysLegion\Auth\Storage\InMemorySession;
 use MonkeysLegion\Auth\Storage\InMemoryTokenStorage;
 use MonkeysLegion\Auth\Storage\InMemoryUserProvider;
 use MonkeysLegion\Auth\Tests\Fixtures\FakeUser;
@@ -100,6 +102,8 @@ class FakeRequest implements ServerRequestInterface
     private array $queryParams = [];
     /** @var array<string, mixed> */
     private array $serverParams = [];
+    /** @var array<string, string> */
+    private array $cookieParams = [];
 
     public function __construct(
         private string $method = 'GET',
@@ -143,8 +147,8 @@ class FakeRequest implements ServerRequestInterface
     public function getUri(): UriInterface { return $this->uri; }
     public function withUri(UriInterface $uri, bool $preserveHost = false): static { $c = clone $this; $c->uri = $uri; return $c; }
     public function getServerParams(): array { return $this->serverParams; }
-    public function getCookieParams(): array { return []; }
-    public function withCookieParams(array $cookies): static { return $this; }
+    public function getCookieParams(): array { return $this->cookieParams; }
+    public function withCookieParams(array $cookies): static { $c = clone $this; $c->cookieParams = $cookies; return $c; }
     public function getQueryParams(): array { return $this->queryParams; }
     public function withQueryParams(array $query): static { $c = clone $this; $c->queryParams = $query; return $c; }
     public function getUploadedFiles(): array { return []; }
@@ -1322,5 +1326,172 @@ final class AuthV2Test extends TestCase
         $user->setRememberToken('rem-token');
         $this->assertSame($user, $provider->findByRememberToken(1, 'rem-token'));
         $this->assertNull($provider->findByRememberToken(1, 'wrong'));
+    }
+
+    // ── Guard: SessionGuard ─────────────────────────────────
+
+    public function test_session_guard_login_and_authenticate(): void
+    {
+        $session  = new InMemorySession();
+        $users    = new InMemoryUserProvider();
+        $user     = new FakeUser(1, 'a@b.com', 'hash');
+        $users->addUser($user);
+
+        $guard = new SessionGuard($session, $users);
+        $this->assertSame('session', $guard->name());
+        $this->assertTrue($guard->guest());
+
+        // Login
+        $guard->login($user);
+        $this->assertTrue($guard->check());
+        $this->assertFalse($guard->guest());
+        $this->assertSame(1, $guard->id());
+        $this->assertSame($user, $guard->user());
+    }
+
+    public function test_session_guard_authenticate_from_session(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $user    = new FakeUser(1, 'a@b.com', 'hash');
+        $users->addUser($user);
+
+        // Simulate previous login by putting data in session
+        $session->put('_ml_auth_id', 1);
+        $session->put('_ml_auth_ver', 0);
+
+        $guard  = new SessionGuard($session, $users);
+        $result = $guard->authenticate(new FakeRequest());
+
+        $this->assertNotNull($result);
+        $this->assertSame(1, $result->getAuthIdentifier());
+    }
+
+    public function test_session_guard_rejects_stale_version(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $user    = new FakeUser(1, 'a@b.com', 'hash', tokenVersion: 5);
+        $users->addUser($user);
+
+        // Session has old version
+        $session->put('_ml_auth_id', 1);
+        $session->put('_ml_auth_ver', 3);
+
+        $guard  = new SessionGuard($session, $users);
+        $result = $guard->authenticate(new FakeRequest());
+
+        $this->assertNull($result);
+    }
+
+    public function test_session_guard_logout(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $user    = new FakeUser(1, 'a@b.com', 'hash');
+        $users->addUser($user);
+
+        $guard = new SessionGuard($session, $users);
+        $guard->login($user);
+        $this->assertTrue($guard->check());
+
+        $guard->logout();
+        $this->assertTrue($guard->guest());
+        $this->assertNull($guard->user());
+        $this->assertNull($guard->id());
+    }
+
+    public function test_session_guard_validates_credentials(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $hash    = password_hash('secret', PASSWORD_BCRYPT);
+        $user    = new FakeUser(1, 'a@b.com', $hash);
+        $users->addUser($user);
+
+        $guard = new SessionGuard($session, $users);
+        $this->assertTrue($guard->validate(['email' => 'a@b.com', 'password' => 'secret']));
+        $this->assertFalse($guard->validate(['email' => 'a@b.com', 'password' => 'wrong']));
+        $this->assertFalse($guard->validate(['email' => 'missing@b.com', 'password' => 'secret']));
+    }
+
+    public function test_session_guard_regenerates_session_on_login(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $user    = new FakeUser(1, 'a@b.com', 'hash');
+        $users->addUser($user);
+
+        $oldId = $session->getId();
+        $guard = new SessionGuard($session, $users);
+        $guard->login($user);
+        $newId = $session->getId();
+
+        $this->assertNotSame($oldId, $newId);
+    }
+
+    public function test_session_guard_via_remember(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $guard   = new SessionGuard($session, $users);
+        $this->assertFalse($guard->viaRemember());
+    }
+
+    public function test_session_guard_property_hook(): void
+    {
+        $session = new InMemorySession();
+        $users   = new InMemoryUserProvider();
+        $user    = new FakeUser(1, 'a@b.com', 'hash');
+        $users->addUser($user);
+
+        $guard = new SessionGuard($session, $users);
+        $this->assertNull($guard->currentUser);
+
+        $guard->login($user);
+        $this->assertSame($user, $guard->currentUser);
+    }
+
+    // ── InMemorySession ─────────────────────────────────────
+
+    public function test_in_memory_session(): void
+    {
+        $session = new InMemorySession();
+
+        $this->assertFalse($session->has('key'));
+        $this->assertNull($session->get('key'));
+        $this->assertSame('default', $session->get('key', 'default'));
+
+        $session->put('key', 'value');
+        $this->assertTrue($session->has('key'));
+        $this->assertSame('value', $session->get('key'));
+
+        $session->forget('key');
+        $this->assertFalse($session->has('key'));
+    }
+
+    public function test_in_memory_session_regenerate(): void
+    {
+        $session = new InMemorySession();
+        $session->put('keep', 'me');
+
+        $oldId = $session->getId();
+        $session->regenerate(false);
+        $this->assertNotSame($oldId, $session->getId());
+        $this->assertTrue($session->has('keep'));
+
+        $session->regenerate(true);
+        $this->assertFalse($session->has('keep'));
+    }
+
+    public function test_in_memory_session_invalidate(): void
+    {
+        $session = new InMemorySession();
+        $session->put('data', '123');
+
+        $oldId = $session->getId();
+        $session->invalidate();
+        $this->assertNotSame($oldId, $session->getId());
+        $this->assertFalse($session->has('data'));
     }
 }
