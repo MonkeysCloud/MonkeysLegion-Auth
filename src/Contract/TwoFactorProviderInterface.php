@@ -5,34 +5,29 @@ declare(strict_types=1);
 namespace MonkeysLegion\Auth\Contract;
 
 /**
- * Contract for two-factor authentication providers.
+ * Contract for two-factor authentication providers (TOTP, etc.).
  */
 interface TwoFactorProviderInterface
 {
     /**
-     * Generate a new secret for the user.
+     * Generate a new secret key.
      */
     public function generateSecret(): string;
 
     /**
-     * Generate the provisioning URI for authenticator apps.
-     */
-    public function getProvisioningUri(string $secret, string $accountName, string $issuer): string;
-
-    /**
-     * Verify a TOTP code against the secret.
+     * Verify a TOTP code against a secret.
      */
     public function verify(string $secret, string $code): bool;
 
     /**
-     * Generate a QR Code URI for the provisioning URI.
+     * Get the provisioning URI for authenticator apps.
      */
-    public function getQrCodeUri(string $uri): string;
+    public function getProvisioningUri(string $secret, string $email, string $issuer): string;
 
     /**
-     * Generate recovery codes.
+     * Generate backup/recovery codes.
      *
-     * @return string[]
+     * @return list<string>
      */
-    public function generateRecoveryCodes(int $count = 8): array;
+    public function generateBackupCodes(int $count = 8): array;
 }

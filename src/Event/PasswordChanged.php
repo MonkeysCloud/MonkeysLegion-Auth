@@ -12,9 +12,4 @@ final class PasswordChanged extends AuthEvent
     ) {
         parent::__construct();
     }
-
-    public function getName(): string
-    {
-        return 'auth.password_changed';
-    }
 }

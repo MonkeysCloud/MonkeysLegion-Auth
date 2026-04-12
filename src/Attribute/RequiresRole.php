@@ -7,26 +7,26 @@ namespace MonkeysLegion\Auth\Attribute;
 use Attribute;
 
 /**
- * Require specific role(s) for a route/method.
+ * Require specific role(s) for access.
  *
  * Usage:
  *   #[RequiresRole('admin')]
- *   #[RequiresRole(['admin', 'moderator'], anyOf: true)]
+ *   #[RequiresRole(['admin', 'editor'], mode: 'any')]
  */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
-final class RequiresRole
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+final readonly class RequiresRole
 {
-    /** @var string[] */
+    /** @var list<string> */
     public array $roles;
 
     /**
-     * @param string|string[] $roles
-     * @param bool $anyOf If true, user needs any of the roles. If false, user needs all roles.
+     * @param string|list<string> $roles
+     * @param 'all'|'any' $mode Whether ALL or ANY roles are required.
      */
     public function __construct(
         string|array $roles,
-        public bool $anyOf = true,
+        public string $mode = 'any',
     ) {
-        $this->roles = (array) $roles;
+        $this->roles = is_array($roles) ? $roles : [$roles];
     }
 }

@@ -7,14 +7,14 @@ namespace MonkeysLegion\Auth\Attribute;
 use Attribute;
 
 /**
- * Mark a route/method as requiring authentication.
+ * Require authentication — simple auth-required marker.
  *
  * Usage:
- *   #[Authenticated]
- *   #[Authenticated(guard: 'api')]
+ *   #[Authenticated]              — any guard
+ *   #[Authenticated(guard: 'api')] — specific guard
  */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_CLASS)]
-final class Authenticated
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+final readonly class Authenticated
 {
     public function __construct(
         public ?string $guard = null,

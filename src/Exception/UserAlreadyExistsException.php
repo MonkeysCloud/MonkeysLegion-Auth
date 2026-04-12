@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace MonkeysLegion\Auth\Exception;
 
-/**
- * Thrown when trying to register a user that already exists.
- */
 final class UserAlreadyExistsException extends AuthException
 {
-    protected int $statusCode = 409;
-
-    public function __construct(string $message = 'User already exists', array $context = [])
+    public function __construct(string $message = 'User already exists.')
     {
-        parent::__construct($message, 409, null, $context);
+        parent::__construct($message);
+    }
+
+    public function getStatusCode(): int
+    {
+        return 409;
     }
 }

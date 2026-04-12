@@ -14,9 +14,4 @@ final class UserRegistered extends AuthEvent
     ) {
         parent::__construct();
     }
-
-    public function getName(): string
-    {
-        return 'auth.user_registered';
-    }
 }

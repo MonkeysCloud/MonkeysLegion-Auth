@@ -4,41 +4,30 @@ declare(strict_types=1);
 
 namespace MonkeysLegion\Auth\Contract;
 
-use MonkeysLegion\Auth\DTO\OAuthUser;
-
 /**
- * Contract for OAuth2 providers.
+ * Contract for OAuth providers.
  */
 interface OAuthProviderInterface
 {
-    /**
-     * Get the provider name (e.g., 'google', 'github').
-     */
     public function getName(): string;
 
     /**
-     * Generate the authorization URL.
-     *
-     * @param string[] $scopes
+     * @param list<string> $scopes
      */
     public function getAuthorizationUrl(string $state, array $scopes = []): string;
 
     /**
-     * Exchange authorization code for access token.
-     *
-     * @return array{access_token: string, refresh_token?: string, expires_in?: int}
+     * @return array{access_token: string, refresh_token: ?string, expires_in: int}
      */
     public function getAccessToken(string $code): array;
 
     /**
-     * Get user info from the provider.
+     * @return array<string, mixed>
      */
-    public function getUser(string $accessToken): OAuthUser;
+    public function getUserInfo(string $accessToken): array;
 
     /**
-     * Refresh an access token.
-     *
-     * @return array{access_token: string, refresh_token?: string, expires_in?: int}
+     * @return array{access_token: string, refresh_token: ?string, expires_in: int}
      */
     public function refreshToken(string $refreshToken): array;
 }

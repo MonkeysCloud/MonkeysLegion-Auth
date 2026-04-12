@@ -7,23 +7,61 @@ namespace MonkeysLegion\Auth\TwoFactor;
 use MonkeysLegion\Auth\Contract\TwoFactorProviderInterface;
 
 /**
- * TOTP (Time-based One-Time Password) provider for 2FA.
- * 
- * Compatible with Google Authenticator, Authy, 1Password, etc.
+ * TOTP (Time-based One-Time Password) provider.
+ *
+ * SECURITY: Uses HMAC-SHA1 per RFC 6238. Allows ±1 time window.
+ * Secrets use CSPRNG via random_bytes().
  */
 final class TotpProvider implements TwoFactorProviderInterface
 {
-    private const SECRET_LENGTH = 20;
-    private const CODE_LENGTH = 6;
-    private const TIME_STEP = 30;
-    private const WINDOW = 1;
+    private const int PERIOD = 30;
+    private const int DIGITS = 6;
+    private const int WINDOW = 1;
 
-    private const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-
-    public function generateSecret(): string
+    public function generateSecret(int $length = 20): string
     {
-        $bytes = random_bytes(self::SECRET_LENGTH);
-        return $this->base32Encode($bytes);
+        $bytes   = random_bytes($length);
+        $base32  = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        $encoded = '';
+
+        $buffer    = 0;
+        $bitsLeft  = 0;
+
+        for ($i = 0; $i < strlen($bytes); $i++) {
+            $buffer  = ($buffer << 8) | ord($bytes[$i]);
+            $bitsLeft += 8;
+
+            while ($bitsLeft >= 5) {
+                $bitsLeft -= 5;
+                $encoded  .= $base32[($buffer >> $bitsLeft) & 0x1f];
+            }
+        }
+
+        if ($bitsLeft > 0) {
+            $encoded .= $base32[($buffer << (5 - $bitsLeft)) & 0x1f];
+        }
+
+        return $encoded;
+    }
+
+    public function verify(string $secret, string $code): bool
+    {
+        $code = preg_replace('/\s+/', '', $code) ?? $code;
+
+        if (strlen($code) !== self::DIGITS) {
+            return false;
+        }
+
+        $timestamp = (int) floor(time() / self::PERIOD);
+
+        for ($i = -self::WINDOW; $i <= self::WINDOW; $i++) {
+            $expected = $this->generateCode($secret, $timestamp + $i);
+            if (hash_equals($expected, $code)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function getProvisioningUri(string $secret, string $email, string $issuer): string
@@ -31,39 +69,13 @@ final class TotpProvider implements TwoFactorProviderInterface
         $params = http_build_query([
             'secret' => $secret,
             'issuer' => $issuer,
-            'algorithm' => 'SHA1',
-            'digits' => self::CODE_LENGTH,
-            'period' => self::TIME_STEP,
+            'digits' => self::DIGITS,
+            'period' => self::PERIOD,
         ]);
 
         $label = rawurlencode($issuer) . ':' . rawurlencode($email);
+
         return "otpauth://totp/{$label}?{$params}";
-    }
-
-    public function getQrCodeUri(string $uri): string
-    {
-        return 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . rawurlencode($uri);
-    }
-
-    public function verify(string $secret, string $code): bool
-    {
-        $code = preg_replace('/\s+/', '', $code);
-
-        if (strlen($code) !== self::CODE_LENGTH || !ctype_digit($code)) {
-            return false;
-        }
-
-        $currentTime = time();
-        $timeStep = (int) floor($currentTime / self::TIME_STEP);
-
-        for ($offset = -self::WINDOW; $offset <= self::WINDOW; $offset++) {
-            $expected = $this->generateCode($secret, $timeStep + $offset);
-            if (hash_equals($expected, $code)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public function generateBackupCodes(int $count = 8): array
@@ -75,87 +87,45 @@ final class TotpProvider implements TwoFactorProviderInterface
         return $codes;
     }
 
-    public function generateRecoveryCodes(int $count = 8): array
-    {
-        return $this->generateBackupCodes($count);
-    }
-
-    public function hashBackupCode(string $code): string
-    {
-        return password_hash(strtoupper($code), PASSWORD_DEFAULT);
-    }
-
-    public function verifyBackupCode(string $code, array $hashes): int|false
-    {
-        $code = strtoupper(preg_replace('/\s+/', '', $code));
-
-        foreach ($hashes as $index => $hash) {
-            if (password_verify($code, $hash)) {
-                return $index;
-            }
-        }
-
-        return false;
-    }
-
-    private function generateCode(string $secret, int $timeStep): string
+    private function generateCode(string $secret, int $counter): string
     {
         $secretBytes = $this->base32Decode($secret);
+        $counterBytes = pack('N*', 0, $counter);
 
-        // Pack time into 64-bit big-endian binary string (RFC 4226/6238 requirement)
-        // usage of pack('J') depends on PHP version/architecture, so we manually pack
-        // high and low 32-bit words to ensure correct byte order on all systems.
-        $time = pack('N', $timeStep >> 32) . pack('N', $timeStep & 0xFFFFFFFF);
+        $hash  = hash_hmac('sha1', $counterBytes, $secretBytes, true);
+        $offset = ord($hash[19]) & 0x0f;
 
-        $hash = hash_hmac('sha1', $time, $secretBytes, true);
-
-        $offset = ord($hash[19]) & 0x0F;
         $code = (
-            ((ord($hash[$offset]) & 0x7F) << 24) |
-            ((ord($hash[$offset + 1]) & 0xFF) << 16) |
-            ((ord($hash[$offset + 2]) & 0xFF) << 8) |
-            (ord($hash[$offset + 3]) & 0xFF)
-        ) % (10 ** self::CODE_LENGTH);
+            ((ord($hash[$offset])     & 0x7f) << 24) |
+            ((ord($hash[$offset + 1]) & 0xff) << 16) |
+            ((ord($hash[$offset + 2]) & 0xff) << 8)  |
+            (ord($hash[$offset + 3])  & 0xff)
+        ) % (10 ** self::DIGITS);
 
-        return str_pad((string) $code, self::CODE_LENGTH, '0', STR_PAD_LEFT);
+        return str_pad((string) $code, self::DIGITS, '0', STR_PAD_LEFT);
     }
 
-    private function base32Encode(string $data): string
+    private function base32Decode(string $encoded): string
     {
-        $binary = '';
-        foreach (str_split($data) as $char) {
-            $binary .= str_pad(decbin(ord($char)), 8, '0', STR_PAD_LEFT);
-        }
+        $chars  = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        $buffer = 0;
+        $bits   = 0;
+        $output = '';
 
-        $result = '';
-        foreach (str_split($binary, 5) as $chunk) {
-            $chunk = str_pad($chunk, 5, '0', STR_PAD_RIGHT);
-            $result .= self::BASE32_ALPHABET[bindec($chunk)];
-        }
-
-        return $result;
-    }
-
-    private function base32Decode(string $data): string
-    {
-        $data = strtoupper($data);
-        $binary = '';
-
-        foreach (str_split($data) as $char) {
-            $pos = strpos(self::BASE32_ALPHABET, $char);
-            if ($pos === false) {
+        for ($i = 0, $len = strlen($encoded); $i < $len; $i++) {
+            $val = strpos($chars, strtoupper($encoded[$i]));
+            if ($val === false) {
                 continue;
             }
-            $binary .= str_pad(decbin($pos), 5, '0', STR_PAD_LEFT);
-        }
+            $buffer = ($buffer << 5) | $val;
+            $bits  += 5;
 
-        $result = '';
-        foreach (str_split($binary, 8) as $chunk) {
-            if (strlen($chunk) === 8) {
-                $result .= chr(bindec($chunk));
+            if ($bits >= 8) {
+                $bits -= 8;
+                $output .= chr(($buffer >> $bits) & 0xff);
             }
         }
 
-        return $result;
+        return $output;
     }
 }

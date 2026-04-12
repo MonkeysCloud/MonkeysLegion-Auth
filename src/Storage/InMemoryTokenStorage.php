@@ -7,58 +7,38 @@ namespace MonkeysLegion\Auth\Storage;
 use MonkeysLegion\Auth\Contract\TokenStorageInterface;
 
 /**
- * In-memory token storage for short-lived persistence (per-request)
- * or for development where valid tokens are not tracked persistently.
+ * In-memory token storage — for testing.
+ *
+ * SECURITY: Not suitable for production (no persistence across processes).
  */
-class InMemoryTokenStorage implements TokenStorageInterface
+final class InMemoryTokenStorage implements TokenStorageInterface
 {
+    /** @var array<string, array{data: array<string, mixed>, expires_at: int}> */
     private array $tokens = [];
+
+    /** @var array<string, int> Token ID → blacklist expiry */
     private array $blacklist = [];
 
     public function store(string $tokenId, array $data, int $ttl): void
     {
         $this->tokens[$tokenId] = [
-            'data' => $data,
+            'data'       => $data,
             'expires_at' => time() + $ttl,
-            'user_id' => $data['id'] ?? null,
         ];
-    }
-
-    public function exists(string $tokenId): bool
-    {
-        if (!isset($this->tokens[$tokenId])) {
-            return false;
-        }
-
-        if (time() > $this->tokens[$tokenId]['expires_at']) {
-            unset($this->tokens[$tokenId]);
-            return false;
-        }
-
-        return true;
     }
 
     public function get(string $tokenId): ?array
     {
-        if (!$this->exists($tokenId)) {
+        if (!isset($this->tokens[$tokenId])) {
+            return null;
+        }
+
+        if (time() >= $this->tokens[$tokenId]['expires_at']) {
+            unset($this->tokens[$tokenId]);
             return null;
         }
 
         return $this->tokens[$tokenId]['data'];
-    }
-
-    public function remove(string $tokenId): void
-    {
-        unset($this->tokens[$tokenId]);
-    }
-
-    public function removeAllForUser(int|string $userId): void
-    {
-        foreach ($this->tokens as $tokenId => $data) {
-            if (($data['user_id'] ?? null) === $userId) {
-                unset($this->tokens[$tokenId]);
-            }
-        }
     }
 
     public function blacklist(string $tokenId, int $ttl): void
@@ -72,11 +52,19 @@ class InMemoryTokenStorage implements TokenStorageInterface
             return false;
         }
 
-        if (time() > $this->blacklist[$tokenId]) {
+        if (time() >= $this->blacklist[$tokenId]) {
             unset($this->blacklist[$tokenId]);
             return false;
         }
 
         return true;
+    }
+
+    public function removeAllForUser(int|string $userId): void
+    {
+        $this->tokens = array_filter(
+            $this->tokens,
+            fn(array $entry) => ($entry['data']['user_id'] ?? null) !== $userId,
+        );
     }
 }

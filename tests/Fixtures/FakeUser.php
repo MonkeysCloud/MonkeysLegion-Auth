@@ -5,76 +5,61 @@ declare(strict_types=1);
 namespace MonkeysLegion\Auth\Tests\Fixtures;
 
 use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
-use MonkeysLegion\Auth\Contract\HasRolesInterface;
 use MonkeysLegion\Auth\Contract\HasPermissionsInterface;
+use MonkeysLegion\Auth\Contract\HasRolesInterface;
+use MonkeysLegion\Auth\Contract\TwoFactorAuthenticatable;
+use MonkeysLegion\Auth\Trait\AuthenticatableTrait;
+use MonkeysLegion\Auth\Trait\HasPermissionsTrait;
+use MonkeysLegion\Auth\Trait\HasRolesTrait;
 
+/**
+ * Test user entity.
+ */
 class FakeUser implements AuthenticatableInterface, HasRolesInterface, HasPermissionsInterface
 {
+    use AuthenticatableTrait;
+    use HasRolesTrait;
+    use HasPermissionsTrait;
+
     public function __construct(
-        public int $id = 1,
-        public string $email = 'test@example.com',
-        public string $passwordHash = '',
-        public int $tokenVersion = 1,
-        public bool $emailVerified = true,
-        public array $roles = [],
-        public array $permissions = [],
-        public ?string $twoFactorSecret = null,
-        public array $recoveryCodes = [],
+        public readonly int $id,
+        public readonly string $email,
+        public string $passwordHash,
+        int $tokenVersion = 0,
+        array $roles = [],
+        array $permissions = [],
     ) {
-        if ($this->passwordHash === '') {
-            $this->passwordHash = password_hash('password123', PASSWORD_DEFAULT);
-        }
+        $this->tokenVersion = $tokenVersion;
+        $this->roles        = $roles;
+        $this->permissions  = $permissions;
     }
+}
 
-    public function getAuthIdentifier(): int|string
-    {
-        return $this->id;
-    }
+class FakeUser2FA extends FakeUser implements TwoFactorAuthenticatable
+{
+    private bool $twoFactorEnabled = false;
+    private ?string $twoFactorSecret = null;
+    /** @var list<string> */
+    private array $recoveryCodes = [];
 
-    public function getAuthPassword(): string
-    {
-        return $this->passwordHash;
-    }
-
-    public function getEmail(): string
-    {
-        return $this->email;
-    }
-
-    public function getTokenVersion(): int
-    {
-        return $this->tokenVersion;
-    }
-
-    public function isEmailVerified(): bool
-    {
-        return $this->emailVerified;
-    }
-
-    public function getRoles(): array
-    {
-        return $this->roles;
-    }
-
-    public function getPermissions(): array
-    {
-        return $this->permissions;
-    }
-
-    public function hasRole(string $role): bool
-    {
-        return in_array($role, $this->roles, true);
-    }
-
-    public function hasPermission(string $permission): bool
-    {
-        return in_array($permission, $this->permissions, true)
-            || in_array('*', $this->permissions, true);
+    public function __construct(
+        int $id,
+        string $email,
+        string $passwordHash,
+        int $tokenVersion = 0,
+        bool $twoFactorEnabled = false,
+        ?string $twoFactorSecret = null,
+        array $recoveryCodes = [],
+    ) {
+        parent::__construct($id, $email, $passwordHash, $tokenVersion);
+        $this->twoFactorEnabled = $twoFactorEnabled;
+        $this->twoFactorSecret  = $twoFactorSecret;
+        $this->recoveryCodes    = $recoveryCodes;
     }
 
     public function hasTwoFactorEnabled(): bool
     {
-        return $this->twoFactorSecret !== null;
+        return $this->twoFactorEnabled;
     }
 
     public function getTwoFactorSecret(): ?string
@@ -86,53 +71,9 @@ class FakeUser implements AuthenticatableInterface, HasRolesInterface, HasPermis
     {
         return $this->recoveryCodes;
     }
-    public function getAuthIdentifierName(): string
-    {
-        return 'id';
-    }
 
-    public function hasAnyRole(array $roles): bool
+    public function setRecoveryCodes(array $codes): void
     {
-        foreach ($roles as $role) {
-            if ($this->hasRole($role)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public function hasAllRoles(array $roles): bool
-    {
-        foreach ($roles as $role) {
-            if (!$this->hasRole($role)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    public function getDirectPermissions(): array
-    {
-        return $this->permissions;
-    }
-
-    public function hasAnyPermission(array $permissions): bool
-    {
-        foreach ($permissions as $permission) {
-            if ($this->hasPermission($permission)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public function hasAllPermissions(array $permissions): bool
-    {
-        foreach ($permissions as $permission) {
-            if (!$this->hasPermission($permission)) {
-                return false;
-            }
-        }
-        return true;
+        $this->recoveryCodes = $codes;
     }
 }

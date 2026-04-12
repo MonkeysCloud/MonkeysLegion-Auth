@@ -7,17 +7,21 @@ namespace MonkeysLegion\Auth\RateLimit;
 use MonkeysLegion\Auth\Contract\RateLimiterInterface;
 
 /**
- * In-memory rate limiter (for single-server/testing).
- * For production, use RedisRateLimiter.
+ * In-memory rate limiter — for testing and single-process apps.
+ *
+ * PERFORMANCE: Uses fixed-window counters with TTL.
  */
 final class InMemoryRateLimiter implements RateLimiterInterface
 {
-    /** @var array<string, array{count: int, expires_at: int}> */
-    private array $cache = [];
+    /** @var array<string, array{hits: int, expires_at: int}> */
+    private array $attempts = [];
 
-    public function attempt(string $key, int $maxAttempts = 5, int $decaySeconds = 60): bool
+    public function attempt(string $key, int $maxAttempts, int $decaySeconds): bool
     {
-        if ($this->tooManyAttempts($key, $maxAttempts)) {
+        $this->cleanup($key);
+        $current = $this->attempts[$key]['hits'] ?? 0;
+
+        if ($current >= $maxAttempts) {
             return false;
         }
 
@@ -25,59 +29,44 @@ final class InMemoryRateLimiter implements RateLimiterInterface
         return true;
     }
 
-    public function remaining(string $key, int $maxAttempts = 5): int
+    public function hit(string $key, int $decaySeconds): int
     {
         $this->cleanup($key);
-        $count = $this->cache[$key]['count'] ?? 0;
-        return max(0, $maxAttempts - $count);
-    }
 
-    public function retryAfter(string $key): int
-    {
-        if (!isset($this->cache[$key])) {
-            return 0;
+        if (!isset($this->attempts[$key])) {
+            $this->attempts[$key] = [
+                'hits'       => 0,
+                'expires_at' => time() + $decaySeconds,
+            ];
         }
 
-        $expiresAt = $this->cache[$key]['expires_at'];
-        return max(0, $expiresAt - time());
+        return ++$this->attempts[$key]['hits'];
+    }
+
+    public function remaining(string $key, int $maxAttempts): int
+    {
+        $this->cleanup($key);
+        $current = $this->attempts[$key]['hits'] ?? 0;
+        return max(0, $maxAttempts - $current);
     }
 
     public function availableIn(string $key): int
     {
-        return $this->retryAfter($key);
+        if (!isset($this->attempts[$key])) {
+            return 0;
+        }
+        return max(0, $this->attempts[$key]['expires_at'] - time());
     }
 
     public function clear(string $key): void
     {
-        unset($this->cache[$key]);
-    }
-
-    public function hit(string $key, int $decaySeconds = 60): int
-    {
-        $this->cleanup($key);
-        $now = time();
-
-        if (!isset($this->cache[$key])) {
-            $this->cache[$key] = [
-                'count' => 0,
-                'expires_at' => $now + $decaySeconds,
-            ];
-        }
-
-        $this->cache[$key]['count']++;
-        return $this->cache[$key]['count'];
-    }
-
-    public function tooManyAttempts(string $key, int $maxAttempts = 5): bool
-    {
-        $this->cleanup($key);
-        return ($this->cache[$key]['count'] ?? 0) >= $maxAttempts;
+        unset($this->attempts[$key]);
     }
 
     private function cleanup(string $key): void
     {
-        if (isset($this->cache[$key]) && $this->cache[$key]['expires_at'] <= time()) {
-            unset($this->cache[$key]);
+        if (isset($this->attempts[$key]) && time() >= $this->attempts[$key]['expires_at']) {
+            unset($this->attempts[$key]);
         }
     }
 }

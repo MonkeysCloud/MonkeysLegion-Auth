@@ -15,9 +15,4 @@ final class LoginSucceeded extends AuthEvent
     ) {
         parent::__construct();
     }
-
-    public function getName(): string
-    {
-        return 'auth.login_succeeded';
-    }
 }

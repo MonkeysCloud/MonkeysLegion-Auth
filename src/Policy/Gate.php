@@ -9,27 +9,34 @@ use MonkeysLegion\Auth\Exception\UnauthorizedException;
 use Closure;
 
 /**
- * Authorization gate for checking abilities.
+ * Authorization gate — ability and policy-based access control.
+ *
+ * Inspired by Laravel's Gate with additions:
+ * - inspect() for detailed deny reasons
+ * - forUser() for scoped checks
+ *
+ * SECURITY: Default-deny — undefined abilities are always denied.
  */
 final class Gate
 {
     /** @var array<string, Closure> */
     private array $abilities = [];
 
-    /** @var array<string, string> Model FQCN to Policy FQCN */
+    /** @var array<string, string> Model FQCN → Policy FQCN */
     private array $policies = [];
 
-    /** @var Closure[] */
+    /** @var list<Closure> */
     private array $beforeCallbacks = [];
 
-    /** @var Closure[] */
+    /** @var list<Closure> */
     private array $afterCallbacks = [];
+
+    // ── Definition ─────────────────────────────────────────────
 
     /**
      * Define an ability check.
      *
-     * @param string  $ability  The ability name
-     * @param Closure $callback Callback receiving (user, ...args) returning bool
+     * @param Closure(AuthenticatableInterface|null, mixed...): bool $callback
      */
     public function define(string $ability, Closure $callback): self
     {
@@ -47,7 +54,7 @@ final class Gate
     }
 
     /**
-     * Register a before callback (runs before all checks).
+     * Register a before callback (super-admin bypass, etc.).
      */
     public function before(Closure $callback): self
     {
@@ -56,7 +63,7 @@ final class Gate
     }
 
     /**
-     * Register an after callback (runs after all checks).
+     * Register an after callback.
      */
     public function after(Closure $callback): self
     {
@@ -64,12 +71,10 @@ final class Gate
         return $this;
     }
 
+    // ── Checking ───────────────────────────────────────────────
+
     /**
-     * Check if user has ability.
-     *
-     * @param AuthenticatableInterface|null $user    The user (null for guests)
-     * @param string                        $ability The ability to check
-     * @param mixed                         ...$args Arguments (typically the model)
+     * Check if user has an ability.
      */
     public function allows(?AuthenticatableInterface $user, string $ability, mixed ...$args): bool
     {
@@ -77,17 +82,16 @@ final class Gate
         foreach ($this->beforeCallbacks as $callback) {
             $result = $callback($user, $ability, ...$args);
             if ($result !== null) {
-                return $this->runAfterCallbacks($user, $ability, $result, $args);
+                return $this->runAfterCallbacks($user, $ability, (bool) $result, $args);
             }
         }
 
         // Check policy if model provided
-        if (!empty($args) && is_object($args[0])) {
-            $model = $args[0];
-            $modelClass = get_class($model);
+        if ($args !== [] && is_object($args[0])) {
+            $modelClass = $args[0]::class;
 
             if (isset($this->policies[$modelClass])) {
-                $result = $this->callPolicy($user, $ability, $model);
+                $result = $this->callPolicy($user, $ability, $args[0]);
                 return $this->runAfterCallbacks($user, $ability, $result, $args);
             }
         }
@@ -103,7 +107,7 @@ final class Gate
     }
 
     /**
-     * Check if user is denied ability.
+     * Check if user is denied an ability.
      */
     public function denies(?AuthenticatableInterface $user, string $ability, mixed ...$args): bool
     {
@@ -118,19 +122,59 @@ final class Gate
     public function authorize(?AuthenticatableInterface $user, string $ability, mixed ...$args): void
     {
         if ($this->denies($user, $ability, ...$args)) {
-            $modelClass = null;
-            if (!empty($args) && is_object($args[0])) {
-                $modelClass = get_class($args[0]);
-            }
-
+            $modelClass = ($args !== [] && is_object($args[0])) ? $args[0]::class : null;
             throw new UnauthorizedException($ability, $modelClass);
         }
     }
 
     /**
+     * Inspect why a check passed or failed.
+     *
+     * @return array{allowed: bool, reason: string}
+     */
+    public function inspect(?AuthenticatableInterface $user, string $ability, mixed ...$args): array
+    {
+        // Before callbacks
+        foreach ($this->beforeCallbacks as $callback) {
+            $result = $callback($user, $ability, ...$args);
+            if ($result !== null) {
+                return [
+                    'allowed' => (bool) $result,
+                    'reason'  => $result ? 'Allowed by before callback.' : 'Denied by before callback.',
+                ];
+            }
+        }
+
+        // Policy
+        if ($args !== [] && is_object($args[0])) {
+            $modelClass = $args[0]::class;
+            if (isset($this->policies[$modelClass])) {
+                $result = $this->callPolicy($user, $ability, $args[0]);
+                return [
+                    'allowed' => $result,
+                    'reason'  => $result
+                        ? "Allowed by {$this->policies[$modelClass]}::{$ability}."
+                        : "Denied by {$this->policies[$modelClass]}::{$ability}.",
+                ];
+            }
+        }
+
+        // Ability
+        if (isset($this->abilities[$ability])) {
+            $result = (bool) ($this->abilities[$ability])($user, ...$args);
+            return [
+                'allowed' => $result,
+                'reason'  => $result ? 'Allowed by ability definition.' : 'Denied by ability definition.',
+            ];
+        }
+
+        return ['allowed' => false, 'reason' => "Ability '{$ability}' is not defined."];
+    }
+
+    /**
      * Check multiple abilities (all must pass).
      *
-     * @param string[] $abilities
+     * @param list<string> $abilities
      */
     public function all(?AuthenticatableInterface $user, array $abilities, mixed ...$args): bool
     {
@@ -145,7 +189,7 @@ final class Gate
     /**
      * Check multiple abilities (any must pass).
      *
-     * @param string[] $abilities
+     * @param list<string> $abilities
      */
     public function any(?AuthenticatableInterface $user, array $abilities, mixed ...$args): bool
     {
@@ -157,21 +201,23 @@ final class Gate
         return false;
     }
 
+    // ── Private ────────────────────────────────────────────────
+
     private function callPolicy(?AuthenticatableInterface $user, string $ability, object $model): bool
     {
-        $modelClass = get_class($model);
-        $policyClass = $this->policies[$modelClass];
+        $policyClass = $this->policies[$model::class];
 
-        /** @var PolicyInterface $policy */
+        /** @var object $policy */
         $policy = new $policyClass();
 
-        // Check before hook
-        $before = $policy->before($user, $ability, $model);
-        if ($before !== null) {
-            return $before;
+        // Check before hook on policy
+        if (method_exists($policy, 'before')) {
+            $before = $policy->before($user, $ability, $model);
+            if ($before !== null) {
+                return (bool) $before;
+            }
         }
 
-        // Check ability method
         if (!method_exists($policy, $ability)) {
             return false;
         }
@@ -179,16 +225,19 @@ final class Gate
         return (bool) $policy->{$ability}($user, $model);
     }
 
+    /**
+     * @param list<mixed> $args
+     */
     private function runAfterCallbacks(
         ?AuthenticatableInterface $user,
         string $ability,
         bool $result,
-        array $args
+        array $args,
     ): bool {
         foreach ($this->afterCallbacks as $callback) {
             $override = $callback($user, $ability, $result, ...$args);
             if ($override !== null) {
-                $result = $override;
+                $result = (bool) $override;
             }
         }
         return $result;

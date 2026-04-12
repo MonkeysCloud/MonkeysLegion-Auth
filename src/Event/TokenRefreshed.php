@@ -12,9 +12,4 @@ final class TokenRefreshed extends AuthEvent
     ) {
         parent::__construct();
     }
-
-    public function getName(): string
-    {
-        return 'auth.token_refreshed';
-    }
 }

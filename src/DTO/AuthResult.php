@@ -7,7 +7,7 @@ namespace MonkeysLegion\Auth\DTO;
 use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
 
 /**
- * Data transfer object for authentication results.
+ * Authentication result — immutable response from auth operations.
  */
 final readonly class AuthResult
 {
@@ -17,15 +17,20 @@ final readonly class AuthResult
         public ?TokenPair $tokens = null,
         public bool $requires2FA = false,
         public ?string $challengeToken = null,
+        public ?string $guard = null,
         public ?string $error = null,
     ) {}
 
-    public static function success(AuthenticatableInterface $user, TokenPair $tokens): self
-    {
+    public static function success(
+        AuthenticatableInterface $user,
+        TokenPair $tokens,
+        ?string $guard = null,
+    ): self {
         return new self(
             success: true,
             user: $user,
             tokens: $tokens,
+            guard: $guard,
         );
     }
 
@@ -46,20 +51,27 @@ final readonly class AuthResult
         );
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         $data = ['success' => $this->success];
 
-        if ($this->tokens) {
+        if ($this->tokens !== null) {
             $data['tokens'] = $this->tokens->toArray();
         }
 
         if ($this->requires2FA) {
-            $data['requires_2fa'] = true;
+            $data['requires_2fa']    = true;
             $data['challenge_token'] = $this->challengeToken;
         }
 
-        if ($this->error) {
+        if ($this->guard !== null) {
+            $data['guard'] = $this->guard;
+        }
+
+        if ($this->error !== null) {
             $data['error'] = $this->error;
         }
 

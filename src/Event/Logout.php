@@ -13,9 +13,4 @@ final class Logout extends AuthEvent
     ) {
         parent::__construct();
     }
-
-    public function getName(): string
-    {
-        return 'auth.logout';
-    }
 }

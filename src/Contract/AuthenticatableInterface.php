@@ -2,10 +2,23 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeyscloud.com>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Contract;
 
 /**
  * Contract for entities that can be authenticated.
+ *
+ * SECURITY: Implementations must never expose raw password hashes
+ * through serialization or public APIs.
  */
 interface AuthenticatableInterface
 {
@@ -15,27 +28,31 @@ interface AuthenticatableInterface
     public function getAuthIdentifier(): int|string;
 
     /**
-     * Get the identifier name (e.g., 'id', 'uuid').
+     * Get the identifier column name (e.g., 'id', 'uuid').
      */
     public function getAuthIdentifierName(): string;
 
     /**
-     * Get the password hash for authentication.
+     * Get the hashed password for credential verification.
+     *
+     * SECURITY: Must return a bcrypt/argon2 hash, never plaintext.
      */
     public function getAuthPassword(): string;
 
     /**
-     * Get the token version for token invalidation.
+     * Get the token version for global token invalidation.
+     *
+     * Incrementing this value invalidates ALL issued tokens.
      */
     public function getTokenVersion(): int;
 
     /**
-     * Check if 2FA is enabled for the user.
+     * Get the remember-me token (if any).
      */
-    public function hasTwoFactorEnabled(): bool;
+    public function getRememberToken(): ?string;
 
     /**
-     * Get the 2FA secret for the user.
+     * Set the remember-me token.
      */
-    public function getTwoFactorSecret(): ?string;
+    public function setRememberToken(string $token): void;
 }

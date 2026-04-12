@@ -7,26 +7,26 @@ namespace MonkeysLegion\Auth\Attribute;
 use Attribute;
 
 /**
- * Require specific permission(s) for a route/method.
+ * Require specific permission(s) for access.
  *
  * Usage:
  *   #[RequiresPermission('posts.create')]
- *   #[RequiresPermission(['posts.create', 'posts.edit'], anyOf: true)]
+ *   #[RequiresPermission(['posts.create', 'posts.edit'], mode: 'any')]
  */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
-final class RequiresPermission
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+final readonly class RequiresPermission
 {
-    /** @var string[] */
+    /** @var list<string> */
     public array $permissions;
 
     /**
-     * @param string|string[] $permissions
-     * @param bool $anyOf If true, user needs any of the permissions. If false, user needs all.
+     * @param string|list<string> $permissions
+     * @param 'all'|'any' $mode
      */
     public function __construct(
         string|array $permissions,
-        public bool $anyOf = true,
+        public string $mode = 'all',
     ) {
-        $this->permissions = (array) $permissions;
+        $this->permissions = is_array($permissions) ? $permissions : [$permissions];
     }
 }
