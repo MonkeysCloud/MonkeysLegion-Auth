@@ -38,6 +38,7 @@ final class SessionGuard implements StatefulGuardInterface
     private const string REMEMBER_KEY = '_ml_remember';
 
     private ?AuthenticatableInterface $_user = null;
+    private bool $viaRememberCookie = false;
 
     /** Currently authenticated user. */
     public ?AuthenticatableInterface $currentUser {
@@ -94,6 +95,7 @@ final class SessionGuard implements StatefulGuardInterface
             $user = $this->users->findByRememberToken($userId, $rememberToken);
             if ($user !== null) {
                 $this->login($user, false);
+                $this->viaRememberCookie = true;
                 return $user;
             }
         }
@@ -144,6 +146,7 @@ final class SessionGuard implements StatefulGuardInterface
      * Log a user in via the session.
      *
      * SECURITY: Regenerates session ID to prevent fixation attacks.
+     * If $remember is true, generates a remember token and persists it.
      */
     public function login(AuthenticatableInterface $user, bool $remember = false): void
     {
@@ -153,6 +156,18 @@ final class SessionGuard implements StatefulGuardInterface
         $this->session->put(self::SESSION_KEY, $user->getAuthIdentifier());
         $this->session->put(self::VERSION_KEY, $user->getTokenVersion());
         $this->_user = $user;
+
+        // Generate and persist remember-me token
+        if ($remember) {
+            $token = bin2hex(random_bytes(32));
+            $this->users->updateRememberToken(
+                $user->getAuthIdentifier(),
+                $token,
+            );
+            // The remember cookie value is set by the caller (middleware/controller)
+            // via: setcookie(self::REMEMBER_KEY, "{$userId}|{$token}", ...)
+            $this->session->put(self::REMEMBER_KEY, $user->getAuthIdentifier() . '|' . $token);
+        }
     }
 
     /**
@@ -174,15 +189,28 @@ final class SessionGuard implements StatefulGuardInterface
      */
     public function logout(): void
     {
+        // Clear remember token if user is logged in
+        if ($this->_user !== null) {
+            $this->users->updateRememberToken(
+                $this->_user->getAuthIdentifier(),
+                null,
+            );
+        }
+
         $this->session->forget(self::SESSION_KEY);
         $this->session->forget(self::VERSION_KEY);
+        $this->session->forget(self::REMEMBER_KEY);
         $this->session->regenerate(true);
 
         $this->_user = null;
+        $this->viaRememberCookie = false;
     }
 
+    /**
+     * Whether the user was authenticated via remember-me cookie.
+     */
     public function viaRemember(): bool
     {
-        return false; // Tracked via cookie presence, not stored here
+        return $this->viaRememberCookie;
     }
 }

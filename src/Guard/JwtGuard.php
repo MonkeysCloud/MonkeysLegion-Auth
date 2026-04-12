@@ -55,6 +55,7 @@ final class JwtGuard implements GuardInterface
     {
         $token = $this->extractBearerToken($request);
         if ($token === null) {
+            $this->_user = null;
             return null;
         }
 

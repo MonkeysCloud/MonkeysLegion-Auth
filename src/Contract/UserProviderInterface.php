@@ -36,5 +36,5 @@ interface UserProviderInterface
 
     public function incrementTokenVersion(int|string $id): void;
 
-    public function updateRememberToken(int|string $id, string $token): void;
+    public function updateRememberToken(int|string $id, ?string $token): void;
 }

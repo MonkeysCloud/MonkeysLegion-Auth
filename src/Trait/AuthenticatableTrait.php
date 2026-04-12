@@ -49,7 +49,7 @@ trait AuthenticatableTrait
         return $this->rememberToken;
     }
 
-    public function setRememberToken(string $token): void
+    public function setRememberToken(?string $token): void
     {
         $this->rememberToken = $token;
     }

@@ -132,10 +132,11 @@ final class AuthService
         }
 
         // Rehash if needed (algorithm/cost upgrade)
+        // SECURITY: Use hashWithoutPolicy to avoid rejecting valid legacy passwords
         if ($this->hasher->needsRehash($user->getAuthPassword())) {
             $this->users->updatePassword(
                 $user->getAuthIdentifier(),
-                $this->hasher->hash($password),
+                $this->hasher->hashWithoutPolicy($password),
             );
         }
 

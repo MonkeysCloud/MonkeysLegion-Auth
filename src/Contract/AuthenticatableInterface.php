@@ -54,5 +54,5 @@ interface AuthenticatableInterface
     /**
      * Set the remember-me token.
      */
-    public function setRememberToken(string $token): void;
+    public function setRememberToken(?string $token): void;
 }

@@ -89,7 +89,7 @@ final class InMemoryUserProvider implements UserProviderInterface
         // No-op for in-memory
     }
 
-    public function updateRememberToken(int|string $id, string $token): void
+    public function updateRememberToken(int|string $id, ?string $token): void
     {
         $user = $this->users[$id] ?? null;
         $user?->setRememberToken($token);

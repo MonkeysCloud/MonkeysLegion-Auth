@@ -32,7 +32,7 @@ final class PasswordHasher
     private array $options;
 
     public function __construct(
-        ?string $algorithm = null,
+        string|int|null $algorithm = null,
         private readonly PasswordPolicy $policy = new PasswordPolicy(),
         int $bcryptCost = 12,
         int $argonMemory = 65536,
@@ -73,13 +73,17 @@ final class PasswordHasher
             throw new \InvalidArgumentException(implode(' ', $errors));
         }
 
-        $hash = password_hash($password, $this->algorithm, $this->options);
+        return $this->performHash($password);
+    }
 
-        if ($hash === false) {
-            throw new \RuntimeException('Password hashing failed.');
-        }
-
-        return $hash;
+    /**
+     * Hash without policy validation (for transparent rehash on login).
+     *
+     * SECURITY: Only use when the password was already verified.
+     */
+    public function hashWithoutPolicy(string $password): string
+    {
+        return $this->performHash($password);
     }
 
     /**
@@ -114,5 +118,18 @@ final class PasswordHasher
     public function validatePolicy(string $password): array
     {
         return $this->policy->validate($password);
+    }
+
+    // ── Private ────────────────────────────────────────────────
+
+    private function performHash(string $password): string
+    {
+        $hash = password_hash($password, $this->algorithm, $this->options);
+
+        if ($hash === false) {
+            throw new \RuntimeException('Password hashing failed.');
+        }
+
+        return $hash;
     }
 }
