@@ -6,8 +6,8 @@ Multi-guard, attribute-first authentication and authorization for the MonkeysLeg
 
 | Feature | Status |
 |---|---|
-| **Multi-Guard System** | JWT, Session, API Key, Composite (try multiple in order) |
-| **Attribute-First Auth** | `#[Guard]`, `#[Authenticated]`, `#[Authorize]`, `#[RequiresRole]`, `#[RequiresPermission]`, `#[RateLimit]` |
+| **Multi-Guard System** | JWT, Session, API Key, WebAuthn/Passkey, Composite (try multiple in order) |
+| **Attribute-First Auth** | `#[Guard]`, `#[Authenticated]`, `#[Authorize]`, `#[RequiresRole]`, `#[RequiresPermission]`, `#[RateLimit]`, `#[Passkey]` |
 | **JWT Service** | HS256/RS256, token families, refresh rotation attack detection |
 | **Session Guard** | Session fixation prevention, token version validation, remember-me |
 | **Policy Gate** | `allows()`, `denies()`, `authorize()`, `inspect()` with deny reasons |
@@ -84,6 +84,41 @@ $user = $guard->authenticate($request);
 
 // Logout
 $guard->logout();
+```
+
+### WebAuthn / Passkey Guard
+
+Integrates with [MonkeysLegion-WebAuthn](https://github.com/MonkeysCloud/MonkeysLegion-WebAuthn) for passwordless authentication:
+
+```php
+use MonkeysLegion\Auth\Guard\WebAuthnGuard;
+use MonkeysLegion\Auth\Event\PasskeyAuthenticated;
+use MonkeysLegion\Auth\Attribute\Passkey;
+
+// 1. Register the guard
+$manager->register('webauthn', new WebAuthnGuard($userProvider));
+
+// 2. In your controller: verify the assertion, then set the request attribute
+$credential = $webAuthnService->verifyAuthentication($assertionResponse);
+$request = $request->withAttribute('webauthn.user_handle', $credential->userHandle);
+
+// 3. The guard resolves the user from the verified attribute
+$user = $manager->guard('webauthn')->authenticate($request);
+
+// 4. Dispatch audit event
+$dispatcher->dispatch(new PasskeyAuthenticated(
+    userId: $user->getAuthIdentifier(),
+    credentialId: base64_encode($credential->credentialId),
+    ipAddress: $serverParams['REMOTE_ADDR'] ?? null,
+));
+```
+
+Mark routes/controllers as requiring passkey authentication:
+
+```php
+#[Passkey]                                      // userVerification: 'preferred'
+#[Passkey(userVerification: 'required')]        // high-assurance actions
+public function transferFunds(): Response { ... }
 ```
 
 ### Attribute-Based Security

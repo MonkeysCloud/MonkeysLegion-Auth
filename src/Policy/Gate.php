@@ -41,6 +41,9 @@ final class Gate
     /** @var list<Closure> */
     private array $afterCallbacks = [];
 
+    /** @var array<string, object> Policy instance cache (FQCN → instance). */
+    private array $policyCache = [];
+
     // ── Definition ─────────────────────────────────────────────
 
     /**
@@ -217,8 +220,9 @@ final class Gate
     {
         $policyClass = $this->policies[$model::class];
 
+        // Cache policy instances to avoid repeated instantiation per request.
         /** @var object $policy */
-        $policy = new $policyClass();
+        $policy = $this->policyCache[$policyClass] ??= new $policyClass();
 
         // Check before hook on policy
         if (method_exists($policy, 'before')) {
