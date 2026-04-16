@@ -53,9 +53,10 @@ final class JwtGuard implements GuardInterface
 
     public function authenticate(ServerRequestInterface $request): ?AuthenticatableInterface
     {
+        $this->_user = null;
+
         $token = $this->extractBearerToken($request);
         if ($token === null) {
-            $this->_user = null;
             return null;
         }
 
