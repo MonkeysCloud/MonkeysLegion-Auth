@@ -14,7 +14,7 @@ declare(strict_types=1);
 
 namespace MonkeysLegion\Auth\Storage;
 
-use MonkeysLegion\Auth\Contract\SessionInterface;
+use MonkeysLegion\Session\Contracts\SessionInterface;
 
 /**
  * In-memory session implementation — for testing.
@@ -23,31 +23,27 @@ final class InMemorySession implements SessionInterface
 {
     /** @var array<string, mixed> */
     private array $data = [];
-    private string $id;
+    private string $_id;
+    private bool $_isStarted = true;
+
+    public string $id {
+        get => $this->_id;
+        set { $this->_id = $value; }
+    }
+
+    public bool $isStarted {
+        get => $this->_isStarted;
+    }
 
     public function __construct()
     {
-        $this->id = bin2hex(random_bytes(16));
+        $this->_id = bin2hex(random_bytes(16));
     }
 
-    public function get(string $key, mixed $default = null): mixed
+    public function start(): bool
     {
-        return $this->data[$key] ?? $default;
-    }
-
-    public function put(string $key, mixed $value): void
-    {
-        $this->data[$key] = $value;
-    }
-
-    public function forget(string $key): void
-    {
-        unset($this->data[$key]);
-    }
-
-    public function has(string $key): bool
-    {
-        return array_key_exists($key, $this->data);
+        $this->_isStarted = true;
+        return true;
     }
 
     public function regenerate(bool $destroy = false): bool
@@ -55,19 +51,63 @@ final class InMemorySession implements SessionInterface
         if ($destroy) {
             $this->data = [];
         }
-        $this->id = bin2hex(random_bytes(16));
+        $this->_id = bin2hex(random_bytes(16));
+        return true;
+    }
+
+    public function save(): bool
+    {
         return true;
     }
 
     public function invalidate(): bool
     {
         $this->data = [];
-        $this->id   = bin2hex(random_bytes(16));
+        $this->_id = bin2hex(random_bytes(16));
         return true;
     }
 
-    public function getId(): string
+    public function get(string $key, mixed $default = null): mixed
     {
-        return $this->id;
+        return $this->data[$key] ?? $default;
     }
+
+    public function set(string $key, mixed $value): void
+    {
+        $this->data[$key] = $value;
+    }
+
+    public function has(string $key): bool
+    {
+        return array_key_exists($key, $this->data);
+    }
+
+    public function remove(string $key): void
+    {
+        unset($this->data[$key]);
+    }
+
+    public function pull(string $key, mixed $default = null): mixed
+    {
+        $value = $this->get($key, $default);
+        $this->remove($key);
+        return $value;
+    }
+
+    public function flash(string $key, mixed $value): void {}
+    public function reflash(): void {}
+    public function keep(string ...$keys): void {}
+    public function now(string $key, mixed $value): void {}
+
+    public function all(): array
+    {
+        return $this->data;
+    }
+
+    public function token(): string
+    {
+        return 'mock-csrf-token';
+    }
+
+    public function regenerateToken(): void {}
 }

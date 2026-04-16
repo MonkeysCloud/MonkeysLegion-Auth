@@ -15,9 +15,9 @@ declare(strict_types=1);
 namespace MonkeysLegion\Auth\Guard;
 
 use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
-use MonkeysLegion\Auth\Contract\SessionInterface;
 use MonkeysLegion\Auth\Contract\StatefulGuardInterface;
 use MonkeysLegion\Auth\Contract\UserProviderInterface;
+use MonkeysLegion\Session\Contracts\SessionInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
@@ -81,8 +81,8 @@ final class SessionGuard implements StatefulGuardInterface
                 }
 
                 // Version mismatch — session invalidated globally
-                $this->session->forget(self::SESSION_KEY);
-                $this->session->forget(self::VERSION_KEY);
+                $this->session->remove(self::SESSION_KEY);
+                $this->session->remove(self::VERSION_KEY);
             }
         }
 
@@ -153,8 +153,8 @@ final class SessionGuard implements StatefulGuardInterface
         // Regenerate session to prevent fixation
         $this->session->regenerate(true);
 
-        $this->session->put(self::SESSION_KEY, $user->getAuthIdentifier());
-        $this->session->put(self::VERSION_KEY, $user->getTokenVersion());
+        $this->session->set(self::SESSION_KEY, $user->getAuthIdentifier());
+        $this->session->set(self::VERSION_KEY, $user->getTokenVersion());
         $this->_user = $user;
 
         // Generate and persist remember-me token
@@ -166,7 +166,7 @@ final class SessionGuard implements StatefulGuardInterface
             );
             // The remember cookie value is set by the caller (middleware/controller)
             // via: setcookie(self::REMEMBER_KEY, "{$userId}|{$token}", ...)
-            $this->session->put(self::REMEMBER_KEY, $user->getAuthIdentifier() . '|' . $token);
+            $this->session->set(self::REMEMBER_KEY, $user->getAuthIdentifier() . '|' . $token);
         }
     }
 
@@ -197,9 +197,9 @@ final class SessionGuard implements StatefulGuardInterface
             );
         }
 
-        $this->session->forget(self::SESSION_KEY);
-        $this->session->forget(self::VERSION_KEY);
-        $this->session->forget(self::REMEMBER_KEY);
+        $this->session->remove(self::SESSION_KEY);
+        $this->session->remove(self::VERSION_KEY);
+        $this->session->remove(self::REMEMBER_KEY);
         $this->session->regenerate(true);
 
         $this->_user = null;

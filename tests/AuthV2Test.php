@@ -1383,8 +1383,8 @@ final class AuthV2Test extends TestCase
         $users->addUser($user);
 
         // Simulate previous login by putting data in session
-        $session->put('_ml_auth_id', 1);
-        $session->put('_ml_auth_ver', 0);
+        $session->set('_ml_auth_id', 1);
+        $session->set('_ml_auth_ver', 0);
 
         $guard  = new SessionGuard($session, $users);
         $result = $guard->authenticate(new FakeRequest());
@@ -1401,8 +1401,8 @@ final class AuthV2Test extends TestCase
         $users->addUser($user);
 
         // Session has old version
-        $session->put('_ml_auth_id', 1);
-        $session->put('_ml_auth_ver', 3);
+        $session->set('_ml_auth_id', 1);
+        $session->set('_ml_auth_ver', 3);
 
         $guard  = new SessionGuard($session, $users);
         $result = $guard->authenticate(new FakeRequest());
@@ -1448,10 +1448,10 @@ final class AuthV2Test extends TestCase
         $user    = new FakeUser(1, 'a@b.com', 'hash');
         $users->addUser($user);
 
-        $oldId = $session->getId();
+        $oldId = $session->id;
         $guard = new SessionGuard($session, $users);
         $guard->login($user);
-        $newId = $session->getId();
+        $newId = $session->id;
 
         $this->assertNotSame($oldId, $newId);
     }
@@ -1488,22 +1488,22 @@ final class AuthV2Test extends TestCase
         $this->assertNull($session->get('key'));
         $this->assertSame('default', $session->get('key', 'default'));
 
-        $session->put('key', 'value');
+        $session->set('key', 'value');
         $this->assertTrue($session->has('key'));
         $this->assertSame('value', $session->get('key'));
 
-        $session->forget('key');
+        $session->remove('key');
         $this->assertFalse($session->has('key'));
     }
 
     public function test_in_memory_session_regenerate(): void
     {
         $session = new InMemorySession();
-        $session->put('keep', 'me');
+        $session->set('keep', 'me');
 
-        $oldId = $session->getId();
+        $oldId = $session->id;
         $session->regenerate(false);
-        $this->assertNotSame($oldId, $session->getId());
+        $this->assertNotSame($oldId, $session->id);
         $this->assertTrue($session->has('keep'));
 
         $session->regenerate(true);
@@ -1513,11 +1513,11 @@ final class AuthV2Test extends TestCase
     public function test_in_memory_session_invalidate(): void
     {
         $session = new InMemorySession();
-        $session->put('data', '123');
+        $session->set('data', '123');
 
-        $oldId = $session->getId();
+        $oldId = $session->id;
         $session->invalidate();
-        $this->assertNotSame($oldId, $session->getId());
+        $this->assertNotSame($oldId, $session->id);
         $this->assertFalse($session->has('data'));
     }
 
