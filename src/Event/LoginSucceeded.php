@@ -2,6 +2,16 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Event;
 
 use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
@@ -14,10 +24,5 @@ final class LoginSucceeded extends AuthEvent
         public readonly ?string $userAgent = null,
     ) {
         parent::__construct();
-    }
-
-    public function getName(): string
-    {
-        return 'auth.login_succeeded';
     }
 }

@@ -2,6 +2,16 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Contract;
 
 /**
@@ -9,36 +19,14 @@ namespace MonkeysLegion\Auth\Contract;
  */
 interface HasPermissionsInterface
 {
-    /**
-     * Get all permissions (direct + via roles).
-     *
-     * @return string[]
-     */
+    /** @return list<string> */
     public function getPermissions(): array;
 
-    /**
-     * Get directly assigned permissions.
-     *
-     * @return string[]
-     */
-    public function getDirectPermissions(): array;
-
-    /**
-     * Check if entity has a specific permission.
-     */
     public function hasPermission(string $permission): bool;
 
-    /**
-     * Check if entity has any of the given permissions.
-     *
-     * @param string[] $permissions
-     */
+    /** @param list<string> $permissions */
     public function hasAnyPermission(array $permissions): bool;
 
-    /**
-     * Check if entity has all of the given permissions.
-     *
-     * @param string[] $permissions
-     */
+    /** @param list<string> $permissions */
     public function hasAllPermissions(array $permissions): bool;
 }

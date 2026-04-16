@@ -2,6 +2,16 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Event;
 
 final class Logout extends AuthEvent
@@ -12,10 +22,5 @@ final class Logout extends AuthEvent
         public readonly ?string $ipAddress = null,
     ) {
         parent::__construct();
-    }
-
-    public function getName(): string
-    {
-        return 'auth.logout';
     }
 }

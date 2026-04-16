@@ -2,52 +2,42 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Exception;
 
-use Exception;
-use Throwable;
-
 /**
- * Base exception for all authentication/authorization errors.
+ * Base exception for all auth errors.
+ *
+ * SECURITY: Context data is for logging only — never exposed to clients.
  */
-class AuthException extends Exception
+class AuthException extends \RuntimeException
 {
-    protected array $context = [];
-
+    /**
+     * @param array<string, mixed> $context Contextual data for logging.
+     */
     public function __construct(
-        string $message = 'Authentication error',
-        int $code = 401,
-        ?Throwable $previous = null,
-        array $context = []
+        string $message = 'Authentication error.',
+        public readonly array $context = [],
+        int $code = 0,
+        ?\Throwable $previous = null,
     ) {
         parent::__construct($message, $code, $previous);
-        $this->context = $context;
     }
 
-    public function getContext(): array
+    /**
+     * HTTP status code for this error.
+     */
+    public function getStatusCode(): int
     {
-        return $this->context;
-    }
-
-    public function __clone(): void
-    {
-        // Allow cloning by implementing this magic method
-    }
-
-    public function withContext(array $context): static
-    {
-        $newContext = array_merge($this->context, $context);
-        return new static($this->getMessage(), $this->getCode(), $this->getPrevious(), $newContext);
-    }
-
-    public function toArray(): array
-    {
-        return [
-            'error' => true,
-            'type' => static::class,
-            'message' => $this->getMessage(),
-            'code' => $this->getCode(),
-            'context' => $this->context,
-        ];
+        return 401;
     }
 }

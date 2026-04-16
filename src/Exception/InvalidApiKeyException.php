@@ -2,17 +2,22 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Exception;
 
-/**
- * Thrown when API key is invalid or revoked.
- */
 final class InvalidApiKeyException extends AuthException
 {
-    protected int $statusCode = 401;
-
-    public function __construct(string $message = 'Invalid API key', array $context = [])
+    public function __construct(string $message = 'Invalid API key.')
     {
-        parent::__construct($message, 8001, null, $context);
+        parent::__construct($message);
     }
 }

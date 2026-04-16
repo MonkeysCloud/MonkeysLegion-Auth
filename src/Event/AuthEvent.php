@@ -2,26 +2,31 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Event;
 
 /**
- * Base class for authentication events.
+ * Base auth event — all auth events extend this.
+ *
+ * SECURITY: Events provide an audit trail. Never include secrets/passwords.
  */
 abstract class AuthEvent
 {
-    public readonly int $occurredAt;
-    public array $metadata = [];
+    public readonly float $timestamp;
+    public readonly string $correlationId;
 
     public function __construct()
     {
-        $this->occurredAt = time();
+        $this->timestamp     = microtime(true);
+        $this->correlationId = bin2hex(random_bytes(16));
     }
-
-    public function withMetadata(array $metadata): static
-    {
-        $this->metadata = array_merge($this->metadata, $metadata);
-        return $this;
-    }
-
-    abstract public function getName(): string;
 }

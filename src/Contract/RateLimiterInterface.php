@@ -2,40 +2,47 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Contract;
 
 /**
- * Contract for rate limiting implementations.
+ * Contract for rate limiting attempts.
  */
 interface RateLimiterInterface
 {
     /**
-     * Attempt to hit the rate limiter.
+     * Record an attempt and check if the limit is exceeded.
      *
-     * @param string $key Unique identifier (e.g., IP, user ID, email)
-     * @param int $maxAttempts Maximum attempts allowed
-     * @param int $decaySeconds Time window in seconds
-     * @return bool True if attempt is allowed, false if rate limited
+     * @return bool True if the attempt is allowed, false if rate limited.
      */
     public function attempt(string $key, int $maxAttempts, int $decaySeconds): bool;
 
     /**
-     * Get remaining attempts for a key.
+     * Record a single hit.
+     */
+    public function hit(string $key, int $decaySeconds): int;
+
+    /**
+     * Get remaining attempts.
      */
     public function remaining(string $key, int $maxAttempts): int;
 
     /**
-     * Get seconds until rate limit resets.
+     * Get seconds until the rate limit resets.
      */
     public function availableIn(string $key): int;
 
     /**
-     * Clear rate limit for a key.
+     * Clear all attempts for a key.
      */
     public function clear(string $key): void;
-
-    /**
-     * Increment the attempt counter.
-     */
-    public function hit(string $key, int $decaySeconds): int;
 }

@@ -2,28 +2,29 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Exception;
 
-/**
- * Thrown when rate limit is exceeded.
- */
 final class RateLimitExceededException extends AuthException
 {
-    private int $retryAfter;
-
     public function __construct(
-        int $retryAfter = 60,
-        string $message = 'Too many requests',
-        array $context = []
+        string $message = 'Too many attempts.',
+        public readonly int $retryAfter = 0,
     ) {
-        $this->retryAfter = $retryAfter;
-        $context['retry_after'] = $retryAfter;
-        
-        parent::__construct($message, 429, null, $context);
+        parent::__construct($message);
     }
 
-    public function getRetryAfter(): int
+    public function getStatusCode(): int
     {
-        return $this->retryAfter;
+        return 429;
     }
 }

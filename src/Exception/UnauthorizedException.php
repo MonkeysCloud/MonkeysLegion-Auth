@@ -2,26 +2,30 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Exception;
 
-/**
- * Thrown when user lacks authorization for an action.
- */
 final class UnauthorizedException extends AuthException
 {
     public function __construct(
-        string $ability = '',
-        ?string $model = null,
-        string $message = 'Unauthorized',
-        array $context = []
+        public readonly string $ability = '',
+        public readonly ?string $modelClass = null,
+        string $message = 'Unauthorized.',
     ) {
-        if ($ability !== '') {
-            $context['ability'] = $ability;
-        }
-        if ($model !== null) {
-            $context['model'] = $model;
-        }
-        
-        parent::__construct($message, 403, null, $context);
+        parent::__construct($message);
+    }
+
+    public function getStatusCode(): int
+    {
+        return 403;
     }
 }

@@ -2,44 +2,55 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Trait;
 
 /**
- * Trait for implementing AuthenticatableInterface.
+ * Default implementation of AuthenticatableInterface.
  *
- * Requires properties: $id, $password_hash (or $passwordHash), $token_version (optional).
+ * Provides sensible defaults for entities that need authentication.
  */
 trait AuthenticatableTrait
 {
-    /**
-     * Get the unique identifier for the user.
-     */
+    protected int $tokenVersion = 0;
+    protected ?string $rememberToken = null;
+
     public function getAuthIdentifier(): int|string
     {
-        return $this->id ?? $this->uuid ?? 0;
+        return $this->id;
     }
 
-    /**
-     * Get the identifier name.
-     */
     public function getAuthIdentifierName(): string
     {
-        return property_exists($this, 'uuid') ? 'uuid' : 'id';
+        return 'id';
     }
 
-    /**
-     * Get the password hash.
-     */
     public function getAuthPassword(): string
     {
-        return $this->password_hash ?? $this->passwordHash ?? '';
+        return $this->passwordHash ?? $this->password_hash ?? '';
     }
 
-    /**
-     * Get the token version for invalidation.
-     */
     public function getTokenVersion(): int
     {
-        return $this->token_version ?? $this->tokenVersion ?? 1;
+        return $this->tokenVersion;
+    }
+
+    public function getRememberToken(): ?string
+    {
+        return $this->rememberToken;
+    }
+
+    public function setRememberToken(?string $token): void
+    {
+        $this->rememberToken = $token;
     }
 }

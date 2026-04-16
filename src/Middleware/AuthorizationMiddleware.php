@@ -2,281 +2,109 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Middleware;
 
-use MonkeysLegion\Auth\Attribute\Authenticated;
-use MonkeysLegion\Auth\Attribute\Can;
-use MonkeysLegion\Auth\Attribute\RequiresPermission;
-use MonkeysLegion\Auth\Attribute\RequiresRole;
+use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
+use MonkeysLegion\Auth\Contract\HasPermissionsInterface;
 use MonkeysLegion\Auth\Contract\HasRolesInterface;
 use MonkeysLegion\Auth\Exception\ForbiddenException;
 use MonkeysLegion\Auth\Exception\UnauthorizedException;
-use MonkeysLegion\Auth\RBAC\PermissionChecker;
-use MonkeysLegion\Auth\Service\AuthorizationService;
+use MonkeysLegion\Auth\Policy\Gate;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use ReflectionClass;
-use ReflectionMethod;
 
 /**
- * Authorization middleware that enforces attribute-based access control.
+ * PSR-15 authorization middleware — reads route attributes.
  *
- * Supports:
- * - #[Can('ability', Model::class)]
- * - #[RequiresRole('admin')]
- * - #[RequiresPermission('posts.create')]
- * - #[Authenticated]
+ * Checks:
+ * 1. User is authenticated
+ * 2. #[RequiresRole] — role check
+ * 3. #[RequiresPermission] — permission check
+ * 4. #[Authorize] — Gate ability check
+ *
+ * SECURITY: Fails closed — missing user = 401.
  */
 final class AuthorizationMiddleware implements MiddlewareInterface
 {
-    /**
-     * @param string[] $publicPaths
-     */
     public function __construct(
-        private AuthorizationService $authorization,
-        private ?PermissionChecker $permissions = null,
-        private array $publicPaths = [],
-        private ?\Closure $responseFactory = null,
+        private readonly Gate $gate,
     ) {}
 
     public function process(
         ServerRequestInterface $request,
         RequestHandlerInterface $handler,
     ): ResponseInterface {
-        $path = $request->getUri()->getPath();
+        $user = $request->getAttribute('auth.user');
 
-        // Skip public paths
-        if ($this->isPublicPath($path)) {
-            return $handler->handle($request);
+        // Check required roles
+        $requiredRoles = $request->getAttribute('auth.requires_roles');
+        if (is_array($requiredRoles) && $requiredRoles !== []) {
+            if (!$user instanceof AuthenticatableInterface) {
+                throw new UnauthorizedException();
+            }
+            $this->checkRoles($user, $requiredRoles, $request->getAttribute('auth.roles_mode', 'any'));
         }
 
-        // Get handler definition
-        $handlerDef = $request->getAttribute('handler');
-
-        if (!is_array($handlerDef) || count($handlerDef) !== 2) {
-            return $handler->handle($request);
+        // Check required permissions
+        $requiredPerms = $request->getAttribute('auth.requires_permissions');
+        if (is_array($requiredPerms) && $requiredPerms !== []) {
+            if (!$user instanceof AuthenticatableInterface) {
+                throw new UnauthorizedException();
+            }
+            $this->checkPermissions($user, $requiredPerms, $request->getAttribute('auth.permissions_mode', 'all'));
         }
 
-        [$class, $method] = $handlerDef;
-
-        try {
-            $this->checkAuthorization($request, $class, $method);
-        } catch (UnauthorizedException|ForbiddenException $e) {
-            return $this->errorResponse($e);
+        // Check Gate ability
+        $ability = $request->getAttribute('auth.authorize_ability');
+        if (is_string($ability) && $ability !== '') {
+            $authUser = $user instanceof AuthenticatableInterface ? $user : null;
+            $this->gate->authorize($authUser, $ability);
         }
 
         return $handler->handle($request);
     }
 
-    /**
-     * Check all authorization attributes.
-     */
-    private function checkAuthorization(
-        ServerRequestInterface $request,
-        string $class,
-        string $method,
-    ): void {
-        $refClass = new ReflectionClass($class);
-        $refMethod = new ReflectionMethod($class, $method);
-
-        $user = $request->getAttribute('user');
-
-        // Gather attributes from class and method
-        $this->checkAuthenticatedAttribute($refClass, $refMethod, $user);
-        $this->checkRoleAttributes($refClass, $refMethod, $user);
-        $this->checkPermissionAttributes($refClass, $refMethod, $user);
-        $this->checkCanAttributes($refClass, $refMethod, $request, $user);
-    }
-
-    /**
-     * Check #[Authenticated] attribute.
-     */
-    private function checkAuthenticatedAttribute(
-        ReflectionClass $class,
-        ReflectionMethod $method,
-        ?object $user,
-    ): void {
-        $attrs = array_merge(
-            $class->getAttributes(Authenticated::class),
-            $method->getAttributes(Authenticated::class)
-        );
-
-        if (empty($attrs)) {
-            return;
-        }
-
-        if ($user === null) {
-            throw new UnauthorizedException();
-        }
-    }
-
-    /**
-     * Check #[RequiresRole] attributes.
-     */
-    private function checkRoleAttributes(
-        ReflectionClass $class,
-        ReflectionMethod $method,
-        ?object $user,
-    ): void {
-        $attrs = array_merge(
-            $class->getAttributes(RequiresRole::class),
-            $method->getAttributes(RequiresRole::class)
-        );
-
-        if (empty($attrs)) {
-            return;
-        }
-
-        if ($user === null) {
-            throw new UnauthorizedException();
-        }
-
+    private function checkRoles(AuthenticatableInterface $user, array $roles, string $mode): void
+    {
         if (!$user instanceof HasRolesInterface) {
-            throw new ForbiddenException('User does not support roles');
+            throw new ForbiddenException('User does not support roles.');
         }
 
-        foreach ($attrs as $attr) {
-            /** @var RequiresRole $meta */
-            $meta = $attr->newInstance();
-
-            $hasRole = $meta->anyOf
-                ? $user->hasAnyRole($meta->roles)
-                : $user->hasAllRoles($meta->roles);
-
-            if (!$hasRole) {
-                throw new ForbiddenException(
-                    'Missing required role(s): ' . implode(', ', $meta->roles)
-                );
-            }
-        }
-    }
-
-    /**
-     * Check #[RequiresPermission] attributes.
-     */
-    private function checkPermissionAttributes(
-        ReflectionClass $class,
-        ReflectionMethod $method,
-        ?object $user,
-    ): void {
-        $attrs = array_merge(
-            $class->getAttributes(RequiresPermission::class),
-            $method->getAttributes(RequiresPermission::class)
-        );
-
-        if (empty($attrs) || !$this->permissions) {
-            return;
-        }
-
-        if ($user === null) {
-            throw new UnauthorizedException();
-        }
-
-        foreach ($attrs as $attr) {
-            /** @var RequiresPermission $meta */
-            $meta = $attr->newInstance();
-
-            $hasPermission = $meta->anyOf
-                ? $this->permissions->canAny($user, $meta->permissions)
-                : $this->permissions->canAll($user, $meta->permissions);
-
-            if (!$hasPermission) {
-                throw new ForbiddenException(
-                    'Missing required permission(s): ' . implode(', ', $meta->permissions)
-                );
-            }
-        }
-    }
-
-    /**
-     * Check #[Can] attributes.
-     */
-    private function checkCanAttributes(
-        ReflectionClass $class,
-        ReflectionMethod $method,
-        ServerRequestInterface $request,
-        ?object $user,
-    ): void {
-        $attrs = array_merge(
-            $class->getAttributes(Can::class),
-            $method->getAttributes(Can::class)
-        );
-
-        if (empty($attrs)) {
-            return;
-        }
-
-        if ($user === null) {
-            throw new UnauthorizedException();
-        }
-
-        foreach ($attrs as $attr) {
-            /** @var Can $meta */
-            $meta = $attr->newInstance();
-
-            // Get model from request if specified
-            $model = $meta->model ? $request->getAttribute('model') : null;
-
-            // This will throw ForbiddenException if unauthorized
-            $this->authorization->authorize($user, $meta->ability, $model);
-        }
-    }
-
-    /**
-     * Check if path matches any public pattern.
-     */
-    private function isPublicPath(string $path): bool
-    {
-        foreach ($this->publicPaths as $pattern) {
-            if ($pattern === '*' || $pattern === '/*') {
-                return true;
-            }
-
-            if (str_ends_with($pattern, '*')) {
-                $prefix = rtrim($pattern, '*');
-                if (str_starts_with($path, $prefix)) {
-                    return true;
-                }
-            }
-
-            if ($pattern === $path) {
-                return true;
-            }
-
-            if (fnmatch($pattern, $path, FNM_CASEFOLD)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Create error response.
-     */
-    private function errorResponse(\Throwable $e): ResponseInterface
-    {
-        if ($this->responseFactory) {
-            return ($this->responseFactory)($e);
-        }
-
-        $statusCode = match (true) {
-            $e instanceof UnauthorizedException => 401,
-            $e instanceof ForbiddenException => 403,
-            default => 500,
+        $passes = match ($mode) {
+            'all'   => $user->hasAllRoles($roles),
+            default => $user->hasAnyRole($roles),
         };
 
-        $body = json_encode([
-            'error' => true,
-            'message' => $e->getMessage(),
-            'code' => $e->getCode(),
-        ], JSON_THROW_ON_ERROR);
+        if (!$passes) {
+            throw new ForbiddenException('Insufficient role.');
+        }
+    }
 
-        $response = new \Nyholm\Psr7\Response($statusCode);
-        $response->getBody()->write($body);
+    private function checkPermissions(AuthenticatableInterface $user, array $permissions, string $mode): void
+    {
+        if (!$user instanceof HasPermissionsInterface) {
+            throw new ForbiddenException('User does not support permissions.');
+        }
 
-        return $response->withHeader('Content-Type', 'application/json');
+        $passes = match ($mode) {
+            'any'   => $user->hasAnyPermission($permissions),
+            default => $user->hasAllPermissions($permissions),
+        };
+
+        if (!$passes) {
+            throw new ForbiddenException('Insufficient permissions.');
+        }
     }
 }

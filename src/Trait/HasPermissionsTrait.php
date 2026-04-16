@@ -2,60 +2,38 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Trait;
 
 /**
- * Trait for implementing HasPermissionsInterface.
- *
- * Requires a $permissions property (array or JSON-decoded array).
+ * Default implementation of HasPermissionsInterface.
  */
 trait HasPermissionsTrait
 {
-    /**
-     * Get all permissions (direct + via roles).
-     *
-     * @return string[]
-     */
+    /** @var list<string> */
+    protected array $permissions = [];
+
     public function getPermissions(): array
     {
-        return $this->getDirectPermissions();
+        return $this->permissions;
     }
 
-    /**
-     * Get directly assigned permissions.
-     *
-     * @return string[]
-     */
-    public function getDirectPermissions(): array
-    {
-        $permissions = $this->permissions ?? [];
-
-        if (is_string($permissions)) {
-            $permissions = json_decode($permissions, true) ?? [];
-        }
-
-        return (array) $permissions;
-    }
-
-    /**
-     * Check if user has a specific permission.
-     */
     public function hasPermission(string $permission): bool
     {
-        $permissions = $this->getPermissions();
-
-        // Wildcard check
-        if (in_array('*', $permissions, true)) {
+        if (in_array($permission, $this->permissions, true)) {
             return true;
         }
-
-        // Exact match
-        if (in_array($permission, $permissions, true)) {
-            return true;
-        }
-
-        // Prefix match (e.g., "posts.*" matches "posts.create")
-        foreach ($permissions as $p) {
+        // Wildcard
+        foreach ($this->permissions as $p) {
             if (str_ends_with($p, '.*')) {
                 $prefix = substr($p, 0, -1);
                 if (str_starts_with($permission, $prefix)) {
@@ -63,39 +41,26 @@ trait HasPermissionsTrait
                 }
             }
         }
-
-        return false;
+        return in_array('*', $this->permissions, true);
     }
 
-    /**
-     * Check if user has any of the given permissions.
-     *
-     * @param string[] $permissions
-     */
     public function hasAnyPermission(array $permissions): bool
     {
-        foreach ($permissions as $permission) {
-            if ($this->hasPermission($permission)) {
+        foreach ($permissions as $p) {
+            if ($this->hasPermission($p)) {
                 return true;
             }
         }
-
         return false;
     }
 
-    /**
-     * Check if user has all of the given permissions.
-     *
-     * @param string[] $permissions
-     */
     public function hasAllPermissions(array $permissions): bool
     {
-        foreach ($permissions as $permission) {
-            if (!$this->hasPermission($permission)) {
+        foreach ($permissions as $p) {
+            if (!$this->hasPermission($p)) {
                 return false;
             }
         }
-
         return true;
     }
 }

@@ -2,11 +2,22 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Service;
 
 use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
 use MonkeysLegion\Auth\Contract\RateLimiterInterface;
 use MonkeysLegion\Auth\Contract\TokenStorageInterface;
+use MonkeysLegion\Auth\Contract\TwoFactorAuthenticatable;
 use MonkeysLegion\Auth\Contract\TwoFactorProviderInterface;
 use MonkeysLegion\Auth\Contract\UserProviderInterface;
 use MonkeysLegion\Auth\DTO\AuthResult;
@@ -19,39 +30,50 @@ use MonkeysLegion\Auth\Event\TokenRefreshed;
 use MonkeysLegion\Auth\Event\UserRegistered;
 use MonkeysLegion\Auth\Exception\AccountLockedException;
 use MonkeysLegion\Auth\Exception\InvalidCredentialsException;
-use MonkeysLegion\Auth\Exception\RateLimitException;
+use MonkeysLegion\Auth\Exception\RateLimitExceededException;
 use MonkeysLegion\Auth\Exception\TokenExpiredException;
 use MonkeysLegion\Auth\Exception\TokenInvalidException;
 use MonkeysLegion\Auth\Exception\TokenRevokedException;
 use MonkeysLegion\Auth\Exception\TwoFactorInvalidException;
 use MonkeysLegion\Auth\Exception\TwoFactorRequiredException;
 use MonkeysLegion\Auth\Exception\UserAlreadyExistsException;
-use PDOException;
 use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
- * Main authentication service with comprehensive security features.
+ * Core authentication service — guard-agnostic credential-based auth.
+ *
+ * SECURITY:
+ * - Rate limiting on login/register to prevent brute-force
+ * - Token versioning for global invalidation
+ * - Refresh token family tracking detects reuse attacks
+ * - 2FA challenge token has short TTL (5 min)
+ *
+ * Uses PHP 8.4: property hooks.
  */
 final class AuthService
 {
-    private const MAX_LOGIN_ATTEMPTS = 5;
-    private const LOCKOUT_SECONDS = 900; // 15 minutes
-    private const CHALLENGE_TOKEN_TTL = 300; // 5 minutes
+    private const int MAX_LOGIN_ATTEMPTS = 5;
+    private const int LOCKOUT_SECONDS    = 900;   // 15 minutes
+    private const int CHALLENGE_TOKEN_TTL = 300;  // 5 minutes
 
     public function __construct(
-        private UserProviderInterface $users,
-        private PasswordHasher $hasher,
-        private JwtService $jwt,
-        private ?TokenStorageInterface $tokenStorage = null,
-        private ?RateLimiterInterface $rateLimiter = null,
-        private ?TwoFactorProviderInterface $twoFactor = null,
-        private ?EventDispatcherInterface $events = null,
+        private readonly UserProviderInterface $users,
+        private readonly PasswordHasher $hasher,
+        private readonly JwtService $jwt,
+        private readonly ?TokenStorageInterface $tokenStorage = null,
+        private readonly ?RateLimiterInterface $rateLimiter = null,
+        private readonly ?TwoFactorProviderInterface $twoFactor = null,
+        private readonly ?EventDispatcherInterface $events = null,
     ) {}
+
+    // ── Registration ───────────────────────────────────────────
 
     /**
      * Register a new user.
      *
+     * @param array<string, mixed> $attributes Extra user attributes.
      * @throws UserAlreadyExistsException
+     * @throws RateLimitExceededException
      */
     public function register(
         string $email,
@@ -59,42 +81,38 @@ final class AuthService
         array $attributes = [],
         ?string $ipAddress = null,
     ): AuthenticatableInterface {
-        // Rate limit registration attempts
         $this->checkRateLimit("register:{$ipAddress}", 10, 3600);
 
-        // Check if user already exists
         if ($this->users->findByEmail($email) !== null) {
-            throw new UserAlreadyExistsException('Email already registered');
+            throw new UserAlreadyExistsException();
         }
 
         try {
-            $user = $this->users->create(array_merge(
-                [
-                    'email' => $email,
-                    'password_hash' => $this->hasher->hash($password),
-                ],
-                $attributes
-            ));
+            $user = $this->users->create(array_merge([
+                'email'         => $email,
+                'password_hash' => $this->hasher->hash($password),
+            ], $attributes));
 
             $this->dispatch(new UserRegistered($user, $ipAddress));
 
             return $user;
-        } catch (PDOException $e) {
-            // Handle race condition: user created between check and insert
+        } catch (\PDOException $e) {
+            // Race condition: user created between check and insert
             if ($e->getCode() === '23000' || (($e->errorInfo[1] ?? null) === 1062)) {
-                throw new UserAlreadyExistsException('Email already registered');
+                throw new UserAlreadyExistsException();
             }
             throw $e;
         }
     }
 
+    // ── Login ──────────────────────────────────────────────────
+
     /**
-     * Authenticate with email/password.
+     * Authenticate with email and password.
      *
      * @throws InvalidCredentialsException
      * @throws AccountLockedException
-     * @throws RateLimitException
-     * @throws TwoFactorRequiredException
+     * @throws RateLimitExceededException
      */
     public function login(
         string $email,
@@ -104,22 +122,29 @@ final class AuthService
     ): AuthResult {
         $rateLimitKey = "login:{$email}";
 
-        // Check rate limit
-        $this->checkLoginRateLimit($rateLimitKey, $email);
+        $this->checkLoginRateLimit($rateLimitKey);
 
-        // Find user
         $user = $this->users->findByEmail($email);
 
-        if (!$user || !$this->hasher->verify($password, $user->getAuthPassword())) {
+        if ($user === null || !$this->hasher->verify($password, $user->getAuthPassword())) {
             $this->recordFailedLogin($rateLimitKey, $email, $ipAddress, $userAgent);
             throw new InvalidCredentialsException();
+        }
+
+        // Rehash if needed (algorithm/cost upgrade)
+        // SECURITY: Use hashWithoutPolicy to avoid rejecting valid legacy passwords
+        if ($this->hasher->needsRehash($user->getAuthPassword())) {
+            $this->users->updatePassword(
+                $user->getAuthIdentifier(),
+                $this->hasher->hashWithoutPolicy($password),
+            );
         }
 
         // Clear rate limit on success
         $this->rateLimiter?->clear($rateLimitKey);
 
-        // Check 2FA if enabled
-        if ($this->userHas2FA($user)) {
+        // Check 2FA
+        if ($user instanceof TwoFactorAuthenticatable && $user->hasTwoFactorEnabled()) {
             $challengeToken = $this->createChallengeToken($user);
             return AuthResult::requires2FA($challengeToken);
         }
@@ -139,32 +164,39 @@ final class AuthService
         ?string $ipAddress = null,
         ?string $userAgent = null,
     ): AuthResult {
-        // Decode challenge token
         $claims = $this->jwt->decode($challengeToken);
 
         if (($claims['type'] ?? '') !== '2fa_challenge') {
-            throw new TokenInvalidException('Invalid challenge token');
+            throw new TokenInvalidException('Invalid challenge token.');
         }
 
         $user = $this->users->findById($claims['sub']);
-        if (!$user) {
-            throw new TokenInvalidException('User not found');
+        if ($user === null) {
+            throw new TokenInvalidException('User not found.');
         }
 
-        // Verify 2FA code
-        $secret = $this->getUserTotpSecret($user);
-        if (!$secret || !$this->twoFactor?->verify($secret, $code)) {
-            // Check recovery codes
-            if (!$this->verifyRecoveryCode($user, $code)) {
-                throw new TwoFactorInvalidException();
+        // Verify TOTP code
+        if ($user instanceof TwoFactorAuthenticatable) {
+            $secret = $user->getTwoFactorSecret();
+            if ($secret !== null && $this->twoFactor?->verify($secret, $code)) {
+                return $this->completeLogin($user, $ipAddress, $userAgent);
+            }
+
+            // Try recovery codes
+            if ($this->verifyRecoveryCode($user, $code)) {
+                return $this->completeLogin($user, $ipAddress, $userAgent);
             }
         }
 
-        return $this->completeLogin($user, $ipAddress, $userAgent);
+        throw new TwoFactorInvalidException();
     }
 
+    // ── Token Management ───────────────────────────────────────
+
     /**
-     * Refresh access token using refresh token.
+     * Refresh an access token using a refresh token.
+     *
+     * SECURITY: Implements token family rotation — detects reuse attacks.
      *
      * @throws TokenExpiredException
      * @throws TokenRevokedException
@@ -172,39 +204,45 @@ final class AuthService
      */
     public function refresh(string $refreshToken, ?string $ipAddress = null): TokenPair
     {
-        // Decode with extra leeway for refresh
-        $claims = $this->jwt->decodeWithLeeway($refreshToken, 86400); // 24h grace
+        $claims = $this->jwt->decodeWithLeeway($refreshToken, 86400);
 
         if (($claims['type'] ?? '') !== 'refresh') {
-            throw new TokenInvalidException('Not a refresh token');
+            throw new TokenInvalidException('Not a refresh token.');
         }
 
         $tokenId = $claims['jti'] ?? null;
 
-        // Check if token is blacklisted
-        if ($tokenId && $this->tokenStorage?->isBlacklisted($tokenId)) {
-            throw new TokenRevokedException();
+        // Check blacklist
+        if ($tokenId !== null && $this->tokenStorage?->isBlacklisted($tokenId)) {
+            // SECURITY: If a blacklisted refresh token is reused, the entire
+            // token family may be compromised. Invalidate all user tokens.
+            $userId = $claims['sub'] ?? null;
+            if ($userId !== null) {
+                $this->users->incrementTokenVersion($userId);
+                $this->tokenStorage->removeAllForUser($userId);
+            }
+            throw new TokenRevokedException('Token reuse detected.');
         }
 
         $userId = $claims['sub'] ?? null;
-        $user = $userId ? $this->users->findById($userId) : null;
+        $user   = $userId !== null ? $this->users->findById($userId) : null;
 
-        if (!$user) {
-            throw new TokenInvalidException('User not found');
+        if ($user === null) {
+            throw new TokenInvalidException('User not found.');
         }
 
         // Verify token version
-        $tokenVersion = $claims['ver'] ?? 0;
-        if ($tokenVersion < $user->getTokenVersion()) {
-            throw new TokenRevokedException('Token version mismatch');
+        if (($claims['ver'] ?? 0) < $user->getTokenVersion()) {
+            throw new TokenRevokedException('Token version mismatch.');
         }
 
-        // Rotate refresh token (blacklist old, issue new)
-        if ($tokenId) {
-            $this->tokenStorage?->blacklist($tokenId, $this->jwt->getRefreshTtl());
+        // Rotate: blacklist old, issue new (same family)
+        if ($tokenId !== null) {
+            $this->tokenStorage?->blacklist($tokenId, $this->jwt->refreshTtl);
         }
 
-        $tokens = $this->issueTokenPair($user);
+        $familyId = $claims['family'] ?? null;
+        $tokens   = $this->issueTokenPair($user, $familyId);
 
         $this->dispatch(new TokenRefreshed($user->getAuthIdentifier(), $ipAddress));
 
@@ -212,64 +250,9 @@ final class AuthService
     }
 
     /**
-     * Logout - revoke tokens.
-     */
-    public function logout(
-        string $accessToken,
-        bool $allDevices = false,
-        ?string $ipAddress = null,
-    ): void {
-        try {
-            $claims = $this->jwt->decodeWithLeeway($accessToken, 3600);
-            $userId = $claims['sub'] ?? null;
-
-            if ($allDevices && $userId) {
-                // Increment token version to invalidate all tokens
-                $this->users->incrementTokenVersion($userId);
-                $this->tokenStorage?->removeAllForUser($userId);
-            } else {
-                // Just blacklist current token
-                $tokenId = $claims['jti'] ?? null;
-                if ($tokenId) {
-                    $this->tokenStorage?->blacklist($tokenId, $this->jwt->getAccessTtl());
-                }
-            }
-
-            $this->dispatch(new Logout($userId ?? 0, $allDevices, $ipAddress));
-        } catch (\Throwable) {
-            // Token already invalid, nothing to revoke
-        }
-    }
-
-    /**
-     * Change password.
-     */
-    public function changePassword(
-        AuthenticatableInterface $user,
-        string $currentPassword,
-        string $newPassword,
-        ?string $ipAddress = null,
-    ): void {
-        if (!$this->hasher->verify($currentPassword, $user->getAuthPassword())) {
-            throw new InvalidCredentialsException('Current password is incorrect');
-        }
-
-        // Update password
-        $this->users->updatePassword(
-            $user->getAuthIdentifier(),
-            $this->hasher->hash($newPassword)
-        );
-
-        // Invalidate all tokens
-        $this->users->incrementTokenVersion($user->getAuthIdentifier());
-        $this->tokenStorage?->removeAllForUser($user->getAuthIdentifier());
-
-        $this->dispatch(new PasswordChanged($user->getAuthIdentifier(), $ipAddress));
-    }
-
-    /**
      * Validate an access token and return claims.
      *
+     * @return array<string, mixed>
      * @throws TokenExpiredException
      * @throws TokenRevokedException
      * @throws TokenInvalidException
@@ -278,18 +261,16 @@ final class AuthService
     {
         $claims = $this->jwt->decode($token);
 
-        // Check blacklist
         $tokenId = $claims['jti'] ?? null;
-        if ($tokenId && $this->tokenStorage?->isBlacklisted($tokenId)) {
+        if ($tokenId !== null && $this->tokenStorage?->isBlacklisted($tokenId)) {
             throw new TokenRevokedException();
         }
 
-        // Verify token version
         $userId = $claims['sub'] ?? null;
-        if ($userId) {
+        if ($userId !== null) {
             $user = $this->users->findById($userId);
-            if ($user && ($claims['ver'] ?? 0) < $user->getTokenVersion()) {
-                throw new TokenRevokedException('Token version mismatch');
+            if ($user !== null && ($claims['ver'] ?? 0) < $user->getTokenVersion()) {
+                throw new TokenRevokedException('Token version mismatch.');
             }
         }
 
@@ -297,7 +278,7 @@ final class AuthService
     }
 
     /**
-     * Get the current user from a token.
+     * Get user from an access token.
      */
     public function getUserFromToken(string $token): ?AuthenticatableInterface
     {
@@ -309,13 +290,78 @@ final class AuthService
         }
     }
 
+    // ── Logout ─────────────────────────────────────────────────
+
     /**
-     * Issue new token pair for a user.
+     * Logout — revoke tokens.
+     *
+     * @param bool $allDevices If true, invalidate ALL tokens via version increment.
      */
-    public function issueTokenPair(AuthenticatableInterface $user): TokenPair
-    {
-        $now = time();
-        $userId = $user->getAuthIdentifier();
+    public function logout(
+        string $accessToken,
+        bool $allDevices = false,
+        ?string $ipAddress = null,
+    ): void {
+        try {
+            $claims = $this->jwt->decodeWithLeeway($accessToken, 3600);
+            $userId = $claims['sub'] ?? null;
+
+            if ($allDevices && $userId !== null) {
+                $this->users->incrementTokenVersion($userId);
+                $this->tokenStorage?->removeAllForUser($userId);
+            } else {
+                $tokenId = $claims['jti'] ?? null;
+                if ($tokenId !== null) {
+                    $this->tokenStorage?->blacklist($tokenId, $this->jwt->accessTtl);
+                }
+            }
+
+            $this->dispatch(new Logout($userId ?? 0, $allDevices, $ipAddress));
+        } catch (\Throwable) {
+            // Token already invalid — nothing to revoke
+        }
+    }
+
+    // ── Password Management ────────────────────────────────────
+
+    /**
+     * Change user's password.
+     *
+     * SECURITY: Invalidates all tokens after password change.
+     */
+    public function changePassword(
+        AuthenticatableInterface $user,
+        string $currentPassword,
+        string $newPassword,
+        ?string $ipAddress = null,
+    ): void {
+        if (!$this->hasher->verify($currentPassword, $user->getAuthPassword())) {
+            throw new InvalidCredentialsException('Current password is incorrect.');
+        }
+
+        $this->users->updatePassword(
+            $user->getAuthIdentifier(),
+            $this->hasher->hash($newPassword),
+        );
+
+        // Invalidate all tokens
+        $this->users->incrementTokenVersion($user->getAuthIdentifier());
+        $this->tokenStorage?->removeAllForUser($user->getAuthIdentifier());
+
+        $this->dispatch(new PasswordChanged($user->getAuthIdentifier(), $ipAddress));
+    }
+
+    // ── Token Issuance ─────────────────────────────────────────
+
+    /**
+     * Issue a new token pair (access + refresh) for a user.
+     */
+    public function issueTokenPair(
+        AuthenticatableInterface $user,
+        ?string $familyId = null,
+    ): TokenPair {
+        $now          = time();
+        $userId       = $user->getAuthIdentifier();
         $tokenVersion = $user->getTokenVersion();
 
         $accessToken = $this->jwt->issueAccessToken([
@@ -326,15 +372,18 @@ final class AuthService
         $refreshToken = $this->jwt->issueRefreshToken([
             'sub' => $userId,
             'ver' => $tokenVersion,
-        ]);
+        ], $familyId);
 
         return new TokenPair(
             accessToken: $accessToken,
             refreshToken: $refreshToken,
-            accessExpiresAt: $now + $this->jwt->getAccessTtl(),
-            refreshExpiresAt: $now + $this->jwt->getRefreshTtl(),
+            accessExpiresAt: $now + $this->jwt->accessTtl,
+            refreshExpiresAt: $now + $this->jwt->refreshTtl,
+            familyId: $familyId,
         );
     }
+
+    // ── Private Helpers ────────────────────────────────────────
 
     private function completeLogin(
         AuthenticatableInterface $user,
@@ -343,47 +392,47 @@ final class AuthService
     ): AuthResult {
         $tokens = $this->issueTokenPair($user);
 
-        // Store refresh token if storage is available
-        if ($this->tokenStorage) {
+        // Store refresh token metadata
+        if ($this->tokenStorage !== null) {
             $refreshTokenId = $this->jwt->getTokenId($tokens->refreshToken);
-            if ($refreshTokenId) {
+            if ($refreshTokenId !== null) {
                 $this->tokenStorage->store($refreshTokenId, [
-                    'user_id' => $user->getAuthIdentifier(),
-                    'ip' => $ipAddress,
+                    'user_id'    => $user->getAuthIdentifier(),
+                    'ip'         => $ipAddress,
                     'user_agent' => $userAgent,
                     'created_at' => time(),
-                ], $this->jwt->getRefreshTtl());
+                ], $this->jwt->refreshTtl);
             }
         }
 
         $this->dispatch(new LoginSucceeded($user, $ipAddress, $userAgent));
 
-        return AuthResult::success($user, $tokens);
+        return AuthResult::success($user, $tokens, 'jwt');
     }
 
     private function createChallengeToken(AuthenticatableInterface $user): string
     {
         return $this->jwt->issue([
-            'sub' => $user->getAuthIdentifier(),
+            'sub'  => $user->getAuthIdentifier(),
             'type' => '2fa_challenge',
         ], self::CHALLENGE_TOKEN_TTL);
     }
 
     private function checkRateLimit(string $key, int $maxAttempts, int $decaySeconds): void
     {
-        if (!$this->rateLimiter) {
+        if ($this->rateLimiter === null) {
             return;
         }
 
         if (!$this->rateLimiter->attempt($key, $maxAttempts, $decaySeconds)) {
             $retryAfter = $this->rateLimiter->availableIn($key);
-            throw new RateLimitException('Too many attempts', $retryAfter);
+            throw new RateLimitExceededException('Too many attempts.', $retryAfter);
         }
     }
 
-    private function checkLoginRateLimit(string $key, string $email): void
+    private function checkLoginRateLimit(string $key): void
     {
-        if (!$this->rateLimiter) {
+        if ($this->rateLimiter === null) {
             return;
         }
 
@@ -392,7 +441,7 @@ final class AuthService
         if ($remaining <= 0) {
             $retryAfter = $this->rateLimiter->availableIn($key);
             throw new AccountLockedException(
-                'Account temporarily locked due to too many failed attempts',
+                'Account temporarily locked due to too many failed attempts.',
                 time() + $retryAfter,
             );
         }
@@ -408,25 +457,22 @@ final class AuthService
         $this->dispatch(new LoginFailed($email, 'Invalid credentials', $ipAddress, $userAgent));
     }
 
-    private function userHas2FA(AuthenticatableInterface $user): bool
+    private function verifyRecoveryCode(object $user, string $code): bool
     {
-        // Check if user has 2FA enabled
-        // This would typically check a property on the user
-        return method_exists($user, 'hasTwoFactorEnabled')
-            && $user->hasTwoFactorEnabled();
-    }
+        if (!$user instanceof TwoFactorAuthenticatable) {
+            return false;
+        }
 
-    private function getUserTotpSecret(AuthenticatableInterface $user): ?string
-    {
-        return method_exists($user, 'getTwoFactorSecret')
-            ? $user->getTwoFactorSecret()
-            : null;
-    }
+        $codes = $user->getRecoveryCodes();
+        foreach ($codes as $hashedCode) {
+            if (hash_equals($hashedCode, hash('sha256', strtoupper(trim($code))))) {
+                // Remove used recovery code
+                $remaining = array_filter($codes, fn(string $c) => $c !== $hashedCode);
+                $user->setRecoveryCodes(array_values($remaining));
+                return true;
+            }
+        }
 
-    private function verifyRecoveryCode(AuthenticatableInterface $user, string $code): bool
-    {
-        // This would check against stored recovery codes
-        // Implementation depends on how recovery codes are stored
         return false;
     }
 

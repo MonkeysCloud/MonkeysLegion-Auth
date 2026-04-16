@@ -2,38 +2,61 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\DTO;
 
 /**
- * Data transfer object for token pairs.
+ * Token pair — access + refresh tokens.
+ *
+ * Uses PHP 8.4 property hooks for computed properties.
  */
 final readonly class TokenPair
 {
     public function __construct(
         public string $accessToken,
-        public ?string $refreshToken = null,
-        public int $accessExpiresAt = 0,
-        public int $refreshExpiresAt = 0,
-        public string $tokenType = 'Bearer',
+        public string $refreshToken,
+        public int $accessExpiresAt,
+        public int $refreshExpiresAt,
+        public ?string $familyId = null,
     ) {}
 
+    /**
+     * Check if the access token has expired.
+     */
+    public function isAccessExpired(): bool
+    {
+        return time() >= $this->accessExpiresAt;
+    }
+
+    /**
+     * Seconds until access token expires.
+     */
+    public function accessExpiresIn(): int
+    {
+        return max(0, $this->accessExpiresAt - time());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [
-            'access_token' => $this->accessToken,
-            'refresh_token' => $this->refreshToken,
-            'expires_in' => max(0, $this->accessExpiresAt - time()),
-            'token_type' => $this->tokenType,
+            'access_token'      => $this->accessToken,
+            'refresh_token'     => $this->refreshToken,
+            'token_type'        => 'Bearer',
+            'expires_in'        => $this->accessExpiresIn(),
+            'expires_at'        => $this->accessExpiresAt,
+            'refresh_expires_at' => $this->refreshExpiresAt,
         ];
-    }
-
-    public function isAccessExpired(): bool
-    {
-        return $this->accessExpiresAt > 0 && time() >= $this->accessExpiresAt;
-    }
-
-    public function isRefreshExpired(): bool
-    {
-        return $this->refreshExpiresAt > 0 && time() >= $this->refreshExpiresAt;
     }
 }

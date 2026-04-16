@@ -2,46 +2,50 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Storage;
 
 use MonkeysLegion\Auth\Contract\AuthenticatableInterface;
 use MonkeysLegion\Auth\Contract\UserProviderInterface;
-use RuntimeException;
 
 /**
- * In-memory user provider for testing and development purposes.
- * Provides a simple, non-persistent storage for user data.
+ * In-memory user provider — for testing.
  */
-class InMemoryUserProvider implements UserProviderInterface
+final class InMemoryUserProvider implements UserProviderInterface
 {
     /** @var array<int|string, AuthenticatableInterface> */
     private array $users = [];
 
-    /** @var array<string, int|string> Email to ID mapping */
-    private array $emailMap = [];
+    /** @var array<string, int|string> Email → user ID */
+    private array $emailIndex = [];
 
-    private int $nextId = 1;
+    /** @var array<string, int|string> API key → user ID */
+    private array $apiKeyIndex = [];
 
-    /**
-     * Add a user to the in-memory storage.
-     */
     public function addUser(AuthenticatableInterface $user): void
     {
         $id = $user->getAuthIdentifier();
         $this->users[$id] = $user;
 
-        // Update email mapping if user has email method
-        if (method_exists($user, 'getEmail') && is_callable([$user, 'getEmail'])) {
-            $email = call_user_func([$user, 'getEmail']);
-            if (is_string($email)) {
-                $this->emailMap[$email] = $id;
-            }
+        // Index by email if available via reflection
+        $email = $this->extractEmail($user);
+        if ($email !== null) {
+            $this->emailIndex[$email] = $id;
         }
+    }
 
-        // Update next ID if the user ID is numeric and higher
-        if (is_int($id) && $id >= $this->nextId) {
-            $this->nextId = $id + 1;
-        }
+    public function addApiKey(int|string $userId, string $key): void
+    {
+        $this->apiKeyIndex[$key] = $userId;
     }
 
     public function findById(int|string $id): ?AuthenticatableInterface
@@ -51,135 +55,51 @@ class InMemoryUserProvider implements UserProviderInterface
 
     public function findByEmail(string $email): ?AuthenticatableInterface
     {
-        $userId = $this->emailMap[$email] ?? null;
-
-        if ($userId === null) {
-            return null;
-        }
-
-        return $this->users[$userId] ?? null;
+        $id = $this->emailIndex[$email] ?? null;
+        return $id !== null ? ($this->users[$id] ?? null) : null;
     }
 
-    public function findByCredentials(array $credentials): ?AuthenticatableInterface
+    public function findByRememberToken(int|string $id, string $token): ?AuthenticatableInterface
     {
-        // Try email first
-        if (isset($credentials['email'])) {
-            return $this->findByEmail($credentials['email']);
+        $user = $this->users[$id] ?? null;
+        if ($user !== null && $user->getRememberToken() === $token) {
+            return $user;
         }
-
-        // Try ID
-        if (isset($credentials['id'])) {
-            return $this->findById($credentials['id']);
-        }
-
-        // Fallback: search all users for matching credentials
-        foreach ($this->users as $user) {
-            $match = true;
-            foreach ($credentials as $key => $value) {
-                $getter = 'get' . ucfirst($key);
-                if (!method_exists($user, $getter) || $user->$getter() !== $value) {
-                    $match = false;
-                    break;
-                }
-            }
-            if ($match) {
-                return $user;
-            }
-        }
-
         return null;
     }
 
-    public function incrementTokenVersion(int|string $userId): void
+    public function findByApiKey(string $key): ?AuthenticatableInterface
     {
-        $user = $this->users[$userId] ?? null;
-
-        if ($user === null) {
-            throw new RuntimeException("User with ID {$userId} not found");
-        }
-
-        // If the user has a public tokenVersion property, increment it
-        if (
-            property_exists($user, 'tokenVersion') &&
-            (new \ReflectionProperty($user, 'tokenVersion'))->isPublic()
-        ) {
-            $user->tokenVersion++;
-        }
+        $id = $this->apiKeyIndex[$key] ?? null;
+        return $id !== null ? ($this->users[$id] ?? null) : null;
     }
 
     public function create(array $attributes): AuthenticatableInterface
     {
-        // This is a simplified implementation that requires a class name or factory
-        // In practice, you'd need to know what type of user to create
-        throw new RuntimeException(
-            'InMemoryUserProvider::create() requires a concrete user class. ' .
-                'Use addUser() instead to add pre-instantiated users.'
-        );
+        throw new \RuntimeException('InMemoryUserProvider::create() not supported. Use addUser().');
     }
 
-    public function updatePassword(int|string $userId, string $passwordHash): void
+    public function updatePassword(int|string $id, string $hashedPassword): void
     {
-        $user = $this->users[$userId] ?? null;
+        // No-op for in-memory
+    }
 
-        if ($user === null) {
-            throw new RuntimeException("User with ID {$userId} not found");
+    public function incrementTokenVersion(int|string $id): void
+    {
+        // No-op for in-memory
+    }
+
+    public function updateRememberToken(int|string $id, ?string $token): void
+    {
+        $user = $this->users[$id] ?? null;
+        $user?->setRememberToken($token);
+    }
+
+    private function extractEmail(object $user): ?string
+    {
+        if (property_exists($user, 'email')) {
+            return (string) $user->email;
         }
-
-        // If the user has a public passwordHash property, update it
-        if (
-            property_exists($user, 'passwordHash') &&
-            (new \ReflectionProperty($user, 'passwordHash'))->isPublic()
-        ) {
-            $user->passwordHash = $passwordHash;
-        }
-    }
-
-    /**
-     * Get all users (for testing purposes).
-     * 
-     * @return array<int|string, AuthenticatableInterface>
-     */
-    public function getAllUsers(): array
-    {
-        return $this->users;
-    }
-
-    /**
-     * Clear all users from storage.
-     */
-    public function clear(): void
-    {
-        $this->users = [];
-        $this->emailMap = [];
-        $this->nextId = 1;
-    }
-
-    /**
-     * Get the number of users in storage.
-     */
-    public function count(): int
-    {
-        return count($this->users);
-    }
-
-    /**
-     * Remove a user from storage.
-     */
-    public function removeUser(int|string $userId): void
-    {
-        $user = $this->users[$userId] ?? null;
-
-        if ($user !== null) {
-            // Remove from email map
-            if (method_exists($user, 'getEmail') && is_callable([$user, 'getEmail'])) {
-                $email = call_user_func([$user, 'getEmail']);
-                if (is_string($email)) {
-                    unset($this->emailMap[$email]);
-                }
-            }
-
-            // Remove from users
-            unset($this->users[$userId]);
-        }
+        return null;
     }
 }

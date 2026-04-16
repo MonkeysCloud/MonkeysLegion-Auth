@@ -2,28 +2,24 @@
 
 declare(strict_types=1);
 
+/**
+ * MonkeysLegion Auth v2
+ *
+ * @package   MonkeysLegion\Auth
+ * @author    MonkeysCloud <jorge@monkeys.cloud>
+ * @license   MIT
+ *
+ * @requires  PHP 8.4
+ */
+
 namespace MonkeysLegion\Auth\Exception;
 
-/**
- * Thrown when 2FA verification is required but not provided.
- */
 final class TwoFactorRequiredException extends AuthException
 {
-    private string $challengeToken;
-
     public function __construct(
-        string $challengeToken,
-        string $message = 'Two-factor authentication required',
-        array $context = []
+        public readonly string $challengeToken = '',
+        string $message = 'Two-factor verification required.',
     ) {
-        $this->challengeToken = $challengeToken;
-        $context['challenge_token'] = $challengeToken;
-
-        parent::__construct($message, 428, null, $context);
-    }
-
-    public function getChallengeToken(): string
-    {
-        return $this->challengeToken;
+        parent::__construct($message);
     }
 }
