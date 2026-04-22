@@ -86,19 +86,10 @@ final class ApiKeyGuard implements GuardInterface
 
     private function extractApiKey(ServerRequestInterface $request): ?string
     {
-        // Check header first
+        // Check header
         $key = $request->getHeaderLine($this->headerName);
         if ($key !== '') {
             return $key;
-        }
-
-        // Check query parameter as fallback
-        if ($this->queryParam !== null) {
-            $params = $request->getQueryParams();
-            $key    = $params[$this->queryParam] ?? '';
-            if (is_string($key) && $key !== '') {
-                return $key;
-            }
         }
 
         return null;

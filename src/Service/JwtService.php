@@ -176,13 +176,17 @@ final class JwtService
         }
     }
 
-    /**
-     * Get token expiration without full verification.
-     *
-     * SECURITY: Does NOT verify signature — use for informational purposes only.
-     */
-    public function getExpiration(string $token): ?int
+    public function getExpiration(string $token, bool $verify = true): ?int
     {
+        if ($verify) {
+            try {
+                $payload = $this->decode($token);
+                return $payload['exp'] ?? null;
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
         $parts = explode('.', $token);
         if (count($parts) !== 3) {
             return null;
@@ -202,11 +206,13 @@ final class JwtService
     }
 
     /**
-     * Check if a token is expired (without signature verification).
+     * Check if a token is expired.
+     *
+     * SECURITY: Verifies signature by default.
      */
-    public function isExpired(string $token): bool
+    public function isExpired(string $token, bool $verify = true): bool
     {
-        $exp = $this->getExpiration($token);
+        $exp = $this->getExpiration($token, $verify);
         return $exp === null || time() > $exp;
     }
 

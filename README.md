@@ -121,6 +121,33 @@ Mark routes/controllers as requiring passkey authentication:
 public function transferFunds(): Response { ... }
 ```
 
+### Core Authentication Service (AuthService)
+
+The central service for managing credential-based login, 2FA, and token lifecycle:
+
+```php
+use MonkeysLegion\Auth\Service\AuthService;
+
+$auth = new AuthService(
+    users: $userProvider,
+    hasher: $passwordHasher,
+    jwt: $jwtService,
+    tokenStorage: $tokenStorage,    // for blacklisting
+    rateLimiter: $rateLimiter,      // for brute-force protection
+    refreshLeeway: 60,              // optional: clock skew leeway in seconds
+);
+
+// Login (returns AuthResult for success, 2FA required, or failure)
+$result = $auth->login('user@example.com', 'password');
+
+if ($result->requires2FA) {
+    // Handling 2FA...
+}
+
+// Refresh token rotation
+$tokens = $auth->refresh($refreshToken);
+```
+
 ### Attribute-Based Security
 
 ```php
@@ -191,6 +218,7 @@ $hasher->needsRehash($hash);             // false
 - **Timing-safe comparisons** — `hash_equals` for all credential/token checks
 - **Account lockout** — configurable failed attempt limits
 - **Audit trail** — all auth events include correlation IDs
+- **Clock skew leeway** — configurable verification leeway for distributed systems
 
 ## Testing
 

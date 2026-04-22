@@ -94,10 +94,36 @@ final class InMemorySession implements SessionInterface
         return $value;
     }
 
-    public function flash(string $key, mixed $value): void {}
+    public function getName(): string
+    {
+        return 'ml_session';
+    }
+
+    public function forget(string $key): void
+    {
+        $this->remove($key);
+    }
+
+    public function getFlash(string $key, mixed $default = null): mixed
+    {
+        return $this->get($key, $default);
+    }
+
+    public function setIpAddress(?string $ip): void {}
+    public function setUserAgent(?string $ua): void {}
+    public function setUserId(string|int|null $id): void {}
+
+    public function flash(string $key, mixed $value): void
+    {
+        $this->set($key, $value);
+    }
+
     public function reflash(): void {}
     public function keep(string ...$keys): void {}
-    public function now(string $key, mixed $value): void {}
+    public function now(string $key, mixed $value): void
+    {
+        $this->set($key, $value);
+    }
 
     public function all(): array
     {
