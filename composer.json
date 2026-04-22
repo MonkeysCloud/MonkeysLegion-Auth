@@ -17,7 +17,7 @@
         "psr/http-server-handler": "^1.0",
         "psr/http-server-middleware": "^1.0",
         "psr/simple-cache": "^3.0",
-        "monkeyscloud/monkeyslegion-session": "*"
+        "monkeyscloud/monkeyslegion-session": "^2.0"
     },
     "require-dev": {
         "phpstan/phpstan": "^2.0",
@@ -55,12 +55,6 @@
             "dev-2.x": "2.0.x-dev"
         }
     },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../session"
-        }
-    ],
     "minimum-stability": "dev",
     "prefer-stable": true
 }

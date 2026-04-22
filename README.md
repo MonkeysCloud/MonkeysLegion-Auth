@@ -8,7 +8,7 @@ Multi-guard, attribute-first authentication and authorization for the MonkeysLeg
 |---|---|
 | **Multi-Guard System** | JWT, Session, API Key, WebAuthn/Passkey, Composite (try multiple in order) |
 | **Attribute-First Auth** | `#[Guard]`, `#[Authenticated]`, `#[Authorize]`, `#[RequiresRole]`, `#[RequiresPermission]`, `#[RateLimit]`, `#[Passkey]` |
-| **JWT Service** | HS256/RS256, token families, refresh rotation attack detection |
+| **JWT Service** | HS256/RS256, token families, refresh rotation attack detection, signature-verified introspection |
 | **Session Guard** | Session fixation prevention, token version validation, remember-me |
 | **Policy Gate** | `allows()`, `denies()`, `authorize()`, `inspect()` with deny reasons |
 | **RBAC** | Hierarchical roles, wildcard permissions, super-admin, decoupled via `RoleRepositoryInterface` |
@@ -29,6 +29,15 @@ Multi-guard, attribute-first authentication and authorization for the MonkeysLeg
 ```bash
 composer require monkeyscloud/monkeyslegion-auth:dev-2.0.0
 ```
+
+## ⚠️ Breaking Changes (Security Patch v2.0.1+)
+
+> [!CAUTION]
+> This version introduces breaking changes as part of a critical security hardening audit. Please review before merging.
+
+- **ApiKeyGuard:** **Behavioral Breaking Change.** Query parameter authentication is no longer supported. While the `$queryParam` constructor argument remains for signature compatibility (marked as deprecated), it is now ignored. Applications must switch to the `X-API-Key` header.
+- **JwtService:** `isExpired()` and `getExpiration()` now **mandate signature verification** by default. They will return `null` if the signature is invalid, even if the payload is readable.
+- **AuthService:** Default refresh token leeway has been reduced from **24 hours to 60 seconds**. Increase `refreshLeeway` in the constructor if your environment has significant clock skew.
 
 ## Architecture
 
@@ -86,6 +95,23 @@ $user = $guard->authenticate($request);
 $guard->logout();
 ```
 
+### API Key Guard (Stateless)
+
+Secure authentication for internal services or CLI tools using the `X-API-Key` header:
+
+```php
+use MonkeysLegion\Auth\Guard\ApiKeyGuard;
+
+$guard = new ApiKeyGuard(
+    users: $userProvider,
+    headerName: 'X-API-Key', // default
+    queryParam: null,        // deprecated & ignored
+);
+
+// Authenticates via header only (security hardened)
+$user = $guard->authenticate($request);
+```
+
 ### WebAuthn / Passkey Guard
 
 Integrates with [MonkeysLegion-WebAuthn](https://github.com/MonkeysCloud/MonkeysLegion-WebAuthn) for passwordless authentication:
@@ -119,6 +145,33 @@ Mark routes/controllers as requiring passkey authentication:
 #[Passkey]                                      // userVerification: 'preferred'
 #[Passkey(userVerification: 'required')]        // high-assurance actions
 public function transferFunds(): Response { ... }
+```
+
+### Core Authentication Service (AuthService)
+
+The central service for managing credential-based login, 2FA, and token lifecycle:
+
+```php
+use MonkeysLegion\Auth\Service\AuthService;
+
+$auth = new AuthService(
+    users: $userProvider,
+    hasher: $passwordHasher,
+    jwt: $jwtService,
+    tokenStorage: $tokenStorage,    // for blacklisting
+    rateLimiter: $rateLimiter,      // for brute-force protection
+    refreshLeeway: 60,              // optional: clock skew leeway in seconds
+);
+
+// Login (returns AuthResult for success, 2FA required, or failure)
+$result = $auth->login('user@example.com', 'password');
+
+if ($result->requires2FA) {
+    // Handling 2FA...
+}
+
+// Refresh token rotation
+$tokens = $auth->refresh($refreshToken);
 ```
 
 ### Attribute-Based Security
@@ -191,12 +244,13 @@ $hasher->needsRehash($hash);             // false
 - **Timing-safe comparisons** — `hash_equals` for all credential/token checks
 - **Account lockout** — configurable failed attempt limits
 - **Audit trail** — all auth events include correlation IDs
+- **Clock skew leeway** — configurable verification leeway for distributed systems
 
 ## Testing
 
 ```bash
 composer test
-# 122 tests, 277 assertions
+# 139 tests, 320 assertions
 ```
 
 ## License
