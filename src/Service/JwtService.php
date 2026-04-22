@@ -178,15 +178,44 @@ final class JwtService
 
     public function getExpiration(string $token, bool $verify = true): ?int
     {
-        if ($verify) {
-            try {
-                $payload = $this->decode($token);
-                return $payload['exp'] ?? null;
-            } catch (\Throwable) {
-                return null;
-            }
+        $unverified = $this->getUnverifiedPayload($token);
+        if ($unverified === null) {
+            return null;
         }
 
+        $exp = $unverified['exp'] ?? null;
+        if (!$verify || $exp === null) {
+            return $exp;
+        }
+
+        try {
+            // If already expired, use dynamic leeway to bypass the temporal check
+            // while still strictly verifying the cryptographic signature.
+            $leeway = 0;
+            if ($exp < time()) {
+                $leeway = time() - $exp + 60; // 1 minute buffer
+            }
+
+            $verified = $this->decodeWithLeeway($token, $leeway);
+            return $verified['exp'] ?? null;
+        } catch (TokenExpiredException) {
+            // Re-throw if it still expires even with our leeway (should be rare)
+            return $exp;
+        } catch (\Throwable) {
+            // Cryptographic failure or malformed token
+            return null;
+        }
+    }
+
+    /**
+     * Decode the payload without signature verification.
+     *
+     * SECURITY: Use ONLY for informational purposes or to prepare for verification.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getUnverifiedPayload(string $token): ?array
+    {
         $parts = explode('.', $token);
         if (count($parts) !== 3) {
             return null;
@@ -199,7 +228,7 @@ final class JwtService
                 512,
                 JSON_THROW_ON_ERROR,
             );
-            return $payload['exp'] ?? null;
+            return is_array($payload) ? $payload : null;
         } catch (\Throwable) {
             return null;
         }

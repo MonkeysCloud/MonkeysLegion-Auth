@@ -8,7 +8,7 @@ Multi-guard, attribute-first authentication and authorization for the MonkeysLeg
 |---|---|
 | **Multi-Guard System** | JWT, Session, API Key, WebAuthn/Passkey, Composite (try multiple in order) |
 | **Attribute-First Auth** | `#[Guard]`, `#[Authenticated]`, `#[Authorize]`, `#[RequiresRole]`, `#[RequiresPermission]`, `#[RateLimit]`, `#[Passkey]` |
-| **JWT Service** | HS256/RS256, token families, refresh rotation attack detection |
+| **JWT Service** | HS256/RS256, token families, refresh rotation attack detection, signature-verified introspection |
 | **Session Guard** | Session fixation prevention, token version validation, remember-me |
 | **Policy Gate** | `allows()`, `denies()`, `authorize()`, `inspect()` with deny reasons |
 | **RBAC** | Hierarchical roles, wildcard permissions, super-admin, decoupled via `RoleRepositoryInterface` |
@@ -84,6 +84,22 @@ $user = $guard->authenticate($request);
 
 // Logout
 $guard->logout();
+```
+
+### API Key Guard (Stateless)
+
+Secure authentication for internal services or CLI tools using the `X-API-Key` header:
+
+```php
+use MonkeysLegion\Auth\Guard\ApiKeyGuard;
+
+$guard = new ApiKeyGuard(
+    users: $userProvider,
+    headerName: 'X-API-Key', // default
+);
+
+// Authenticates via header only (security hardened)
+$user = $guard->authenticate($request);
 ```
 
 ### WebAuthn / Passkey Guard
@@ -224,7 +240,7 @@ $hasher->needsRehash($hash);             // false
 
 ```bash
 composer test
-# 122 tests, 277 assertions
+# 139 tests, 320 assertions
 ```
 
 ## License

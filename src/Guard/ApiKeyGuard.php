@@ -20,7 +20,7 @@ use MonkeysLegion\Auth\Contract\UserProviderInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
- * API key guard — validates X-API-Key header or query parameter.
+ * API key guard — validates presence and value of X-API-Key header.
  *
  * SECURITY: Keys are compared using hash_equals to prevent timing attacks.
  */
@@ -31,7 +31,6 @@ final class ApiKeyGuard implements GuardInterface
     public function __construct(
         private readonly UserProviderInterface $users,
         private readonly string $headerName = 'X-API-Key',
-        private readonly ?string $queryParam = null,
     ) {}
 
     public function name(): string
