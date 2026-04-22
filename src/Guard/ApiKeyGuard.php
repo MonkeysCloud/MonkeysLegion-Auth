@@ -28,9 +28,14 @@ final class ApiKeyGuard implements GuardInterface
 {
     private ?AuthenticatableInterface $_user = null;
 
+    /**
+     * @param string $headerName
+     * @param string|null $queryParam DEPRECATED: Query parameter authentication is disabled for security.
+     */
     public function __construct(
         private readonly UserProviderInterface $users,
         private readonly string $headerName = 'X-API-Key',
+        private readonly ?string $queryParam = null,
     ) {}
 
     public function name(): string

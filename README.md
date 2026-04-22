@@ -30,6 +30,15 @@ Multi-guard, attribute-first authentication and authorization for the MonkeysLeg
 composer require monkeyscloud/monkeyslegion-auth:dev-2.0.0
 ```
 
+## ⚠️ Breaking Changes (Security Patch v2.0.1+)
+
+> [!CAUTION]
+> This version introduces breaking changes as part of a critical security hardening audit. Please review before merging.
+
+- **ApiKeyGuard:** **Behavioral Breaking Change.** Query parameter authentication is no longer supported. While the `$queryParam` constructor argument remains for signature compatibility (marked as deprecated), it is now ignored. Applications must switch to the `X-API-Key` header.
+- **JwtService:** `isExpired()` and `getExpiration()` now **mandate signature verification** by default. They will return `null` if the signature is invalid, even if the payload is readable.
+- **AuthService:** Default refresh token leeway has been reduced from **24 hours to 60 seconds**. Increase `refreshLeeway` in the constructor if your environment has significant clock skew.
+
 ## Architecture
 
 ```
@@ -96,6 +105,7 @@ use MonkeysLegion\Auth\Guard\ApiKeyGuard;
 $guard = new ApiKeyGuard(
     users: $userProvider,
     headerName: 'X-API-Key', // default
+    queryParam: null,        // deprecated & ignored
 );
 
 // Authenticates via header only (security hardened)
