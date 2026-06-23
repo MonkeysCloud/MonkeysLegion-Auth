@@ -52,7 +52,8 @@ final class AuthenticationMiddleware implements MiddlewareInterface
             // Attach user and guard to request for downstream use
             $request = $request
                 ->withAttribute('auth.user', $user)
-                ->withAttribute('auth.guard', $guardName);
+                ->withAttribute('auth.guard', $guardName)
+                ->withAttribute('user_id', $user->getAuthIdentifier());
         } elseif ($this->isAuthRequired($request)) {
             // Protected route but no authenticated user → 401
             return $this->responseFactory->createResponse(401, 'Unauthorized');
