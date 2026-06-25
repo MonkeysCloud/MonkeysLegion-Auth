@@ -64,6 +64,7 @@ final class AuthService
         private readonly ?RateLimiterInterface $rateLimiter = null,
         private readonly ?TwoFactorProviderInterface $twoFactor = null,
         private readonly ?EventDispatcherInterface $events = null,
+        private readonly int $refreshLeeway = 60,
     ) {}
 
     // ── Registration ───────────────────────────────────────────
@@ -204,7 +205,7 @@ final class AuthService
      */
     public function refresh(string $refreshToken, ?string $ipAddress = null): TokenPair
     {
-        $claims = $this->jwt->decodeWithLeeway($refreshToken, 86400);
+        $claims = $this->jwt->decodeWithLeeway($refreshToken, $this->refreshLeeway);
 
         if (($claims['type'] ?? '') !== 'refresh') {
             throw new TokenInvalidException('Not a refresh token.');
